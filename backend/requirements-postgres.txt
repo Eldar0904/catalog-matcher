@@ -1,0 +1,4 @@
+# Optional: only needed if you switch DATABASE_URL to Postgres (e.g. via
+# docker-compose, or a future pgvector-based v2). Not required for the
+# default local SQLite setup.
+psycopg2-binary==2.9.9
