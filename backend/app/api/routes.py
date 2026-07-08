@@ -24,6 +24,27 @@ from app.matching.matching_config import MatchingConfig
 router = APIRouter()
 
 
+def _clear_matches_for_catalog_source(db: Session, source_id: int) -> int:
+    """
+    Remove match_results that point at products from this catalog source.
+
+    Called before replacing catalog rows so the UI/export never reference
+    deleted catalog_product ids.
+    """
+    product_ids = [
+        pid for (pid,) in db.query(CatalogProduct.id)
+        .filter(CatalogProduct.source_id == source_id)
+        .all()
+    ]
+    if not product_ids:
+        return 0
+    return (
+        db.query(MatchResult)
+        .filter(MatchResult.catalog_product_id.in_(product_ids))
+        .delete(synchronize_session=False)
+    )
+
+
 def _get_or_create_source(db: Session, name: str) -> CatalogSource:
     source = db.query(CatalogSource).filter(CatalogSource.name == name).first()
     if not source:
@@ -93,7 +114,9 @@ def upload_catalog(
 
     source = _get_or_create_source(db, source_name)
 
+    cleared_matches = 0
     if replace_existing:
+        cleared_matches = _clear_matches_for_catalog_source(db, source.id)
         db.query(CatalogProduct).filter(CatalogProduct.source_id == source.id).delete()
         db.commit()
 
@@ -111,6 +134,8 @@ def upload_catalog(
         embedded = embed_catalog_source(db, source.id, force=True)
 
     msg = f"Imported catalog '{source_name}'"
+    if cleared_matches:
+        msg += f"; cleared {cleared_matches} stale match(es)"
     if embedded:
         msg += f"; embedded {embedded} products"
 
