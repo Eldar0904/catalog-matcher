@@ -33,11 +33,45 @@ export async function uploadItems(file) {
   return res.json();
 }
 
-export async function runMatching(sourceName = "government") {
+export async function fetchMatchCapabilities() {
+  const res = await fetch(`${BASE}/match/capabilities`);
+  await handle(res);
+  return res.json();
+}
+
+export async function runMatching(options = {}) {
+  const {
+    sourceName = "government",
+    matchingMode = "balanced",
+    topKCandidates = null,
+    topNResults = null,
+    minSimilarityScore = null,
+    useCodeMatching = null,
+    useTfidf = null,
+    useFuzzyText = null,
+    useEmbeddings = null,
+    embeddingModel = null,
+    embedCatalogIfMissing = true,
+  } = options;
+
+  const body = {
+    source_name: sourceName,
+    matching_mode: matchingMode,
+    embed_catalog_if_missing: embedCatalogIfMissing,
+  };
+  if (topKCandidates != null) body.top_k_candidates = topKCandidates;
+  if (topNResults != null) body.top_n_results = topNResults;
+  if (minSimilarityScore != null) body.min_similarity_score = minSimilarityScore;
+  if (useCodeMatching != null) body.use_code_matching = useCodeMatching;
+  if (useTfidf != null) body.use_tfidf = useTfidf;
+  if (useFuzzyText != null) body.use_fuzzy_text = useFuzzyText;
+  if (useEmbeddings != null) body.use_embeddings = useEmbeddings;
+  if (embeddingModel != null) body.embedding_model = embeddingModel;
+
   const res = await fetch(`${BASE}/match/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source_name: sourceName }),
+    body: JSON.stringify(body),
   });
   await handle(res);
   return res.json();

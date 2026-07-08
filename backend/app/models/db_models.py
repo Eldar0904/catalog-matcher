@@ -46,6 +46,10 @@ class CatalogProduct(Base):
     # Normalized text used for matching (lowercased, cleaned, concatenated)
     normalized_text = Column(Text)
 
+    # Semantic embedding (JSON list of floats) + model name used to produce it
+    embedding_json = Column(Text, nullable=True)
+    embedding_model = Column(String(255), nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     source = relationship("CatalogSource", back_populates="products")

@@ -1,22 +1,8 @@
-# Python
 __pycache__/
 *.pyc
-.venv/
-venv/
-.pytest_cache/
-*.db
-
-# Env / secrets
 .env
-.env.local
-frontend/.env.local
-
-# Node / frontend
 node_modules/
 dist/
-.vite/
-
-# Runtime data (keep directory structure via .gitkeep)
 backend/data/uploads/*
 backend/data/exports/*
 !backend/data/uploads/.gitkeep

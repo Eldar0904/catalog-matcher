@@ -19,13 +19,14 @@ class Candidate:
     catalog_product_id: int
     score: float           # 0..1, higher is better
     explanation: str       # short human-readable rationale
+    code_matched: bool = False
 
 
 class BaseRetriever(ABC):
     """Stage 1: cheap, broad recall — get top-K candidates for one item."""
 
     @abstractmethod
-    def get_top_k(self, item_normalized_text: str, source_id: int, k: int) -> List[Candidate]:
+    def get_top_k(self, item: dict, source_id: int, k: int) -> List[Candidate]:
         ...
 
 
@@ -54,6 +55,6 @@ class MatchingEngine:
         self.ranker = ranker
 
     def match_item(self, item: dict, source_id: int, top_k: int, top_n: int) -> List[Candidate]:
-        candidates = self.retriever.get_top_k(item["normalized_text"], source_id, top_k)
+        candidates = self.retriever.get_top_k(item, source_id, top_k)
         candidates = self.filter_.filter(item, candidates)
         return self.ranker.rank(item, candidates, top_n)

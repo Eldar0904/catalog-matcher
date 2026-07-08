@@ -1,0 +1,78 @@
+"""
+Semantic retriever using precomputed product embeddings.
+
+Falls back gracefully when embeddings are missing for some/all products.
+"""
+from typing import Dict, List, Tuple
+
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from sqlalchemy.orm import Session
+
+from app.matching.base import BaseRetriever, Candidate
+from app.models.db_models import CatalogProduct
+from app.services.embedding import encode_texts, embedding_text_for_product, parse_embedding
+
+
+class EmbeddingRetriever(BaseRetriever):
+    def __init__(self, db: Session, model_name: str):
+        self.db = db
+        self.model_name = model_name
+        self._cache: Dict[int, Tuple[np.ndarray, List[int]]] = {}
+
+    def _build_index(self, source_id: int):
+        products = (
+            self.db.query(CatalogProduct)
+            .filter(CatalogProduct.source_id == source_id)
+            .all()
+        )
+        ids: List[int] = []
+        rows: List[np.ndarray] = []
+        for p in products:
+            vec = parse_embedding(p.embedding_json)
+            if vec is not None:
+                ids.append(p.id)
+                rows.append(vec)
+
+        if rows:
+            matrix = np.vstack(rows)
+        else:
+            matrix = None
+
+        self._cache[source_id] = (matrix, ids)
+
+    def invalidate(self, source_id: int):
+        self._cache.pop(source_id, None)
+
+    def get_top_k(self, item: dict, source_id: int, k: int) -> List[Candidate]:
+        if source_id not in self._cache:
+            self._build_index(source_id)
+
+        matrix, product_ids = self._cache[source_id]
+        if matrix is None or len(product_ids) == 0:
+            return []
+
+        query_parts = [
+            item.get("item_name") or "",
+            item.get("description") or "",
+            item.get("item_code") or "",
+        ]
+        query_text = " ".join(p for p in query_parts if p).strip()
+        if not query_text:
+            query_text = item.get("normalized_text") or ""
+        if not query_text.strip():
+            return []
+
+        query_vec = encode_texts([query_text], self.model_name)
+        sims = cosine_similarity(query_vec, matrix)[0]
+
+        ranked = sorted(zip(product_ids, sims), key=lambda x: x[1], reverse=True)[:k]
+        return [
+            Candidate(
+                catalog_product_id=pid,
+                score=float(score),
+                explanation=f"semantic embedding similarity {score:.3f}",
+            )
+            for pid, score in ranked
+            if score > 0
+        ]

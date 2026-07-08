@@ -1,11 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import Base, engine
+from app.database import Base, engine, run_light_migrations, init_pgvector
 from app.api.routes import router
 from app.models import db_models  # noqa: F401 (ensures models are registered)
 
+init_pgvector()
 Base.metadata.create_all(bind=engine)
+run_light_migrations()
 
 app = FastAPI(
     title="Catalog Matcher API",

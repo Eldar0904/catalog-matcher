@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt requirements-postgres.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-postgres.txt
+COPY requirements.txt requirements-postgres.txt requirements-semantic.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-postgres.txt -r requirements-semantic.txt
 
 COPY . .
 

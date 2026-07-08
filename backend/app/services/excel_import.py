@@ -90,7 +90,7 @@ def read_catalog_excel(file_path: str) -> List[dict]:
         technical_specs = get("technical_specs")
         price = to_float(get("price"))
 
-        normalized_text = build_normalized_text(name, brand, model, description, technical_specs)
+        normalized_text = build_normalized_text(code, name, brand, model, description, technical_specs)
 
         rows.append({
             "code": code,
@@ -132,7 +132,7 @@ def read_items_excel(file_path: str) -> List[dict]:
         description = get("description")
         quantity = to_float(get("quantity"))
 
-        normalized_text = build_normalized_text(item_name, description)
+        normalized_text = build_normalized_text(item_code, item_name, description)
 
         rows.append({
             "item_code": item_code,

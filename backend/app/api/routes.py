@@ -17,7 +17,9 @@ from app.schemas import (
 )
 from app.services.excel_import import read_catalog_excel, read_items_excel
 from app.services.export import export_results, export_results_batched
+from app.services.embedding import embed_catalog_source, embeddings_available
 from app.matching.factory import build_engine
+from app.matching.matching_config import MatchingConfig
 
 router = APIRouter()
 
@@ -44,11 +46,38 @@ def list_catalog_sources(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/match/capabilities")
+def match_capabilities():
+    """Tell the UI which matching features are available in this deployment."""
+    return {
+        "embeddings_available": embeddings_available(),
+        "modes": [
+            {
+                "id": "fast",
+                "label": "Быстрый",
+                "description": "Код + TF-IDF (~3 мин на 3000 поз.)",
+            },
+            {
+                "id": "balanced",
+                "label": "Сбалансированный",
+                "description": "Код + TF-IDF + fuzzy + семантика (рекомендуется)",
+            },
+            {
+                "id": "semantic",
+                "label": "Семантический",
+                "description": "Как сбалансированный (+ LLM rerank в будущем)",
+            },
+        ],
+        "default_mode": settings.default_matching_mode,
+    }
+
+
 @router.post("/upload/catalog", response_model=UploadResponse)
 def upload_catalog(
     file: UploadFile = File(...),
     source_name: str = Query(default="government"),
     replace_existing: bool = Query(default=True),
+    compute_embeddings: bool = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """Upload a catalog Excel file (government or any future supplier)."""
@@ -72,7 +101,20 @@ def upload_catalog(
         db.add(CatalogProduct(source_id=source.id, **row))
     db.commit()
 
-    return UploadResponse(message=f"Imported catalog '{source_name}'", rows_imported=len(rows))
+    embedded = 0
+    should_embed = (
+        compute_embeddings
+        if compute_embeddings is not None
+        else settings.auto_embed_on_catalog_upload
+    )
+    if should_embed and embeddings_available():
+        embedded = embed_catalog_source(db, source.id, force=True)
+
+    msg = f"Imported catalog '{source_name}'"
+    if embedded:
+        msg += f"; embedded {embedded} products"
+
+    return UploadResponse(message=msg, rows_imported=len(rows))
 
 
 @router.post("/upload/items", response_model=UploadResponse)
@@ -118,12 +160,31 @@ def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
     if not items:
         raise HTTPException(status_code=400, detail="No internal items imported yet")
 
-    top_k = payload.top_k_candidates or settings.top_k_candidates
-    top_n = payload.top_n_results or settings.top_n_results
+    match_cfg = MatchingConfig.from_request(
+        matching_mode=payload.matching_mode,
+        top_k_candidates=payload.top_k_candidates,
+        top_n_results=payload.top_n_results,
+        min_similarity_score=payload.min_similarity_score,
+        use_code_matching=payload.use_code_matching,
+        use_tfidf=payload.use_tfidf,
+        use_fuzzy_text=payload.use_fuzzy_text,
+        use_embeddings=payload.use_embeddings,
+        embedding_model=payload.embedding_model,
+    )
 
-    engine = build_engine(db, source.id)
+    if match_cfg.use_embeddings and payload.embed_catalog_if_missing and embeddings_available():
+        embed_catalog_source(db, source.id, model_name=match_cfg.embedding_model)
 
-    run = MatchingRun(source_id=source.id, engine_name="tfidf_v1", params={"top_k": top_k, "top_n": top_n})
+    top_k = match_cfg.top_k_candidates
+    top_n = match_cfg.top_n_results
+
+    engine = build_engine(db, source.id, config=match_cfg)
+
+    run = MatchingRun(
+        source_id=source.id,
+        engine_name=match_cfg.engine_name(),
+        params=match_cfg.to_dict(),
+    )
     db.add(run)
     db.commit()
     db.refresh(run)

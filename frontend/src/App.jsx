@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   uploadCatalog, uploadItems, runMatching, fetchItems,
   selectMatch, searchCatalogProducts, exportResults, exportResultsBatched,
+  fetchMatchCapabilities,
 } from "./api.js";
 
 const BEST_MATCH_THRESHOLD = 0.8;
@@ -188,6 +189,14 @@ export default function App() {
   const [status,      setStatus]      = useState(null);
   const [loading,     setLoading]     = useState(false);
   const [filter,      setFilter]      = useState("all");
+  const [matchMode,   setMatchMode]   = useState("balanced");
+  const [capabilities, setCapabilities] = useState(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advOpts, setAdvOpts] = useState({
+    topK: "",
+    minScore: "",
+    useEmbeddings: null,
+  });
 
   const toast = (type, text) => {
     setStatus({ type, text });
@@ -200,6 +209,15 @@ export default function App() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    fetchMatchCapabilities()
+      .then((c) => {
+        setCapabilities(c);
+        setMatchMode(c.default_mode || "balanced");
+      })
+      .catch(() => {});
+  }, []);
 
   const wrap = async (fn) => {
     setLoading(true);
@@ -222,8 +240,13 @@ export default function App() {
   });
 
   const handleRunMatching = () => wrap(async () => {
-    const r = await runMatching();
-    toast("success", `Подбор завершён — ${r.items_processed} позиций`);
+    const opts = { matchingMode: matchMode };
+    if (advOpts.topK !== "") opts.topKCandidates = Number(advOpts.topK);
+    if (advOpts.minScore !== "") opts.minSimilarityScore = Number(advOpts.minScore);
+    if (advOpts.useEmbeddings !== null) opts.useEmbeddings = advOpts.useEmbeddings;
+
+    const r = await runMatching(opts);
+    toast("success", `Подбор завершён (${matchMode}) — ${r.items_processed} позиций`);
     await load();
   });
 
@@ -272,7 +295,7 @@ export default function App() {
       <header className="page-header">
         <div style={{ display: "flex", alignItems: "center" }}>
           <h1>Catalog Matcher</h1>
-          <span className="sub">TF-IDF + rapidfuzz · без LLM</span>
+          <span className="sub">гибрид: код · TF-IDF · fuzzy · семантика</span>
         </div>
         <div className="header-right">
           {loading && <div className="spinner" />}
@@ -326,14 +349,83 @@ export default function App() {
               <div className="step-label">
                 <span className="step-num">3</span>Запустить подбор
               </div>
-              <div className="step-controls">
+              <div className="step-controls match-controls">
+                <select
+                  className="mode-select"
+                  value={matchMode}
+                  onChange={(e) => setMatchMode(e.target.value)}
+                  disabled={loading}
+                  title="Режим сопоставления"
+                >
+                  {(capabilities?.modes || [
+                    { id: "fast", label: "Быстрый" },
+                    { id: "balanced", label: "Сбалансированный" },
+                    { id: "semantic", label: "Семантический" },
+                  ]).map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </select>
                 <button className="btn btn-primary"
                   onClick={handleRunMatching} disabled={loading || total === 0}>
                   {loading
                     ? <><div className="spinner" style={{ borderTopColor: "#fff" }} /> Обработка…</>
                     : "▶ Запустить"}
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setShowAdvanced((v) => !v)}
+                >
+                  {showAdvanced ? "Скрыть" : "Параметры"}
+                </button>
               </div>
+              {showAdvanced && (
+                <div className="advanced-panel">
+                  <label>
+                    top_k
+                    <input
+                      type="number"
+                      min="5"
+                      max="200"
+                      placeholder="авто"
+                      value={advOpts.topK}
+                      onChange={(e) => setAdvOpts({ ...advOpts, topK: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    min score
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      placeholder="0.15"
+                      value={advOpts.minScore}
+                      onChange={(e) => setAdvOpts({ ...advOpts, minScore: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    эмбеддинги
+                    <select
+                      value={advOpts.useEmbeddings === null ? "" : advOpts.useEmbeddings ? "1" : "0"}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setAdvOpts({
+                          ...advOpts,
+                          useEmbeddings: v === "" ? null : v === "1",
+                        });
+                      }}
+                    >
+                      <option value="">из режима</option>
+                      <option value="1">вкл</option>
+                      <option value="0">выкл</option>
+                    </select>
+                  </label>
+                  {capabilities && !capabilities.embeddings_available && (
+                    <span className="adv-hint">Семантика: установите sentence-transformers на backend</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

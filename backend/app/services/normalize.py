@@ -45,9 +45,14 @@ def clean_code(value: Optional[str]) -> str:
     """Normalize an item/government code: uppercase, strip whitespace."""
     if value is None:
         return ""
+    # Excel often stores numeric codes as floats (12345.0)
+    if isinstance(value, float) and value == int(value):
+        value = int(value)
     text = str(value).strip().upper()
     if text.lower() in ("nan", "none", ""):
         return ""
+    if text.endswith(".0") and text[:-2].isdigit():
+        text = text[:-2]
     return text
 
 

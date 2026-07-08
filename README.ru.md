@@ -26,8 +26,12 @@ Docker)» ниже.
    в том числе русскоязычные заголовки).
 2. Загрузите `Our_Items.xlsx` (колонки: Item Code, Item Name, Description,
    Quantity).
-3. Нажмите «Run matching» («Запустить сопоставление»). Для каждого
-   внутреннего товара это делает следующее:
+3. Нажмите «Run matching» («Запустить сопоставление»). Выберите режим:
+   - **Быстрый** — код + TF-IDF (~3 мин на 3000 поз.)
+   - **Сбалансированный** (рекомендуется) — код + TF-IDF + fuzzy + семантика
+   - **Семантический** — как сбалансированный (LLM rerank — в будущем)
+   Кнопка «Параметры» открывает top_k, min score и вкл/выкл эмбеддинги.
+   Для каждой внутренней позиции:
    - извлекает топ-20 кандидатов по косинусному сходству TF-IDF
    - применяет детерминированные фильтры (усиление за точное/похожее
      совпадение кода, отсечение по минимальному порогу схожести)
@@ -48,9 +52,15 @@ Docker)» ниже.
 backend/app/
   matching/
     base.py                 # интерфейсы BaseRetriever / BaseFilter / BaseRanker
-    tfidf_retriever.py      # v1: косинусное сходство TF-IDF (без внешних вызовов)
-    deterministic_filter.py # фильтрация по правилам (совпадение кода, порог оценки)
-    heuristic_ranker.py     # v1: ранжирование по оценке
+    code_retriever.py       # поиск по коду (exact + fuzzy) — до TF-IDF
+    fuzzy_retriever.py      # fuzzy по названию (token_set_ratio)
+    tfidf_retriever.py      # косинусное сходство TF-IDF
+    embedding_retriever.py  # семантика по эмбеддингам (sentence-transformers)
+    hybrid_retriever.py     # объединение retriever'ов (RRF)
+    merge.py                # Reciprocal Rank Fusion
+    matching_config.py      # пресеты fast / balanced / semantic
+    deterministic_filter.py # фильтрация по правилам
+    heuristic_ranker.py     # ранжирование по оценке
     factory.py               # <- ЕДИНСТВЕННОЕ место, где собираются реализации
   models/db_models.py        # CatalogSource, CatalogProduct, InternalItem, MatchResult
   services/
@@ -84,13 +94,35 @@ backend/app/
 Backend:
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+python -m venv .venv
 ```
-По умолчанию используется локальный файл SQLite (`catalog_matcher.db`) —
-устанавливать PostgreSQL не нужно. Чтобы использовать Postgres/pgvector,
-задайте переменную окружения `DATABASE_URL` и установите
+
+Windows (PowerShell) — активировать venv и запустить:
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
+```
+
+Если `Activate.ps1` блокируется политикой выполнения, можно без активации:
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+Linux/macOS:
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
+```
+По умолчанию используется локальный файл SQLite (`catalog_matcher.db`).
+Для семантики (режим balanced/semantic) установите дополнительно:
+`pip install -r requirements-semantic.txt` (скачает модель ~500 МБ при первом запуске).
+Чтобы использовать Postgres/pgvector, задайте `DATABASE_URL` и установите
 `requirements-postgres.txt`.
 
 Frontend:

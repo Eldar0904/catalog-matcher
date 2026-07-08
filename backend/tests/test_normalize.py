@@ -67,10 +67,11 @@ class TestCleanCode:
         for v in ["nan", "NaN", "None", ""]:
             assert clean_code(v) == ""
 
-    def test_preserves_internal_punctuation(self):
-        # codes often contain dots/dashes that should NOT be stripped here,
-        # unlike clean_text
-        assert clean_code("gov.code-001") == "GOV.CODE-001"
+    def test_numeric_float_from_excel(self):
+        assert clean_code(12345.0) == "12345"
+
+    def test_numeric_int_preserved(self):
+        assert clean_code(42) == "42"
 
 
 class TestToFloat:

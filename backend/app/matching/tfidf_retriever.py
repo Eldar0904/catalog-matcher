@@ -46,7 +46,8 @@ class TfidfRetriever(BaseRetriever):
     def invalidate(self, source_id: int):
         self._cache.pop(source_id, None)
 
-    def get_top_k(self, item_normalized_text: str, source_id: int, k: int) -> List[Candidate]:
+    def get_top_k(self, item: dict, source_id: int, k: int) -> List[Candidate]:
+        item_normalized_text = item.get("normalized_text") or ""
         if source_id not in self._cache:
             self._build_index(source_id)
 

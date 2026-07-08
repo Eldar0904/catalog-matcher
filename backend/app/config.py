@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     top_k_candidates: int = 20
     top_n_results: int = 3
     min_similarity_score: float = 0.15  # deterministic filter cutoff
+    default_matching_mode: str = "balanced"
+    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    embedding_batch_size: int = 64
+    auto_embed_on_catalog_upload: bool = True
 
     class Config:
         env_file = ".env"

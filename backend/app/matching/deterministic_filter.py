@@ -37,25 +37,30 @@ class DeterministicFilter(BaseFilter):
 
             score = c.score
             explanation = c.explanation
+            code_matched = c.code_matched
 
             # Rule: exact code match is a very strong signal -> boost score
             if item_code and product.code and item_code == product.code:
                 score = max(score, 0.95)
                 explanation += "; exact code match"
+                code_matched = True
             elif item_code and product.code:
                 code_sim = fuzz.ratio(item_code, product.code) / 100.0
                 if code_sim > 0.8:
                     score = max(score, min(0.9, score + 0.2))
                     explanation += f"; similar code ({code_sim:.2f})"
+                    code_matched = True
 
             # Rule: drop anything below the minimum similarity floor
-            if score < self.min_score:
+            # (code matches are always kept — they are strong deterministic signals)
+            if score < self.min_score and not c.code_matched:
                 continue
 
             filtered.append(Candidate(
                 catalog_product_id=c.catalog_product_id,
                 score=score,
                 explanation=explanation,
+                code_matched=code_matched,
             ))
 
         return filtered

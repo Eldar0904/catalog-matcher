@@ -1,5 +1,5 @@
-from typing import Optional, List
-from pydantic import BaseModel
+from typing import Optional, List, Literal
+from pydantic import BaseModel, Field
 
 
 class CatalogProductOut(BaseModel):
@@ -48,8 +48,16 @@ class SelectMatchRequest(BaseModel):
 
 class RunMatchingRequest(BaseModel):
     source_name: str = "government"
-    top_k_candidates: Optional[int] = None
-    top_n_results: Optional[int] = None
+    matching_mode: Literal["fast", "balanced", "semantic"] = "balanced"
+    top_k_candidates: Optional[int] = Field(default=None, ge=5, le=200)
+    top_n_results: Optional[int] = Field(default=None, ge=1, le=10)
+    min_similarity_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    use_code_matching: Optional[bool] = None
+    use_tfidf: Optional[bool] = None
+    use_fuzzy_text: Optional[bool] = None
+    use_embeddings: Optional[bool] = None
+    embedding_model: Optional[str] = None
+    embed_catalog_if_missing: bool = True
 
 
 class UploadResponse(BaseModel):
