@@ -70,6 +70,9 @@ class TestCleanCode:
     def test_numeric_float_from_excel(self):
         assert clean_code(12345.0) == "12345"
 
+    def test_nan_float_from_excel(self):
+        assert clean_code(float("nan")) == ""
+
     def test_numeric_int_preserved(self):
         assert clean_code(42) == "42"
 
@@ -92,6 +95,9 @@ class TestToFloat:
 
     def test_returns_none_for_non_numeric(self):
         assert to_float("not a number") is None
+
+    def test_returns_none_for_nan_float(self):
+        assert to_float(float("nan")) is None
 
     def test_parses_int_input(self):
         assert to_float(42) == 42.0

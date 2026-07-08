@@ -4,9 +4,10 @@ Text and value normalization utilities.
 Kept deliberately simple and deterministic (no ML) so behavior is
 predictable and auditable. Anything fuzzier belongs in the matching layer.
 """
+import math
 import re
 import unicodedata
-from typing import Optional
+from typing import Any, Optional
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -22,12 +23,22 @@ _UNIT_REPLACEMENTS = {
 }
 
 
+def is_missing(value: Any) -> bool:
+    """True for None, pandas/numpy NaN, and common empty Excel placeholders."""
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    text = str(value).strip().lower()
+    return text in ("", "nan", "none", "n/a", "-", "<na>", "nat")
+
+
 def clean_text(value: Optional[str]) -> str:
     """Lowercase, strip accents/punctuation noise, collapse whitespace."""
-    if value is None:
+    if is_missing(value):
         return ""
     text = str(value).strip()
-    if not text or text.lower() in ("nan", "none", "n/a", "-"):
+    if text.lower() in ("nan", "none", "n/a", "-"):
         return ""
 
     text = unicodedata.normalize("NFKC", text)
@@ -41,13 +52,16 @@ def clean_text(value: Optional[str]) -> str:
     return text
 
 
-def clean_code(value: Optional[str]) -> str:
+def clean_code(value: Any) -> str:
     """Normalize an item/government code: uppercase, strip whitespace."""
-    if value is None:
+    if is_missing(value):
         return ""
     # Excel often stores numeric codes as floats (12345.0)
-    if isinstance(value, float) and value == int(value):
-        value = int(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return ""
+        if value == int(value):
+            value = int(value)
     text = str(value).strip().upper()
     if text.lower() in ("nan", "none", ""):
         return ""
@@ -57,10 +71,13 @@ def clean_code(value: Optional[str]) -> str:
 
 
 def to_float(value) -> Optional[float]:
-    if value is None or value == "":
+    if is_missing(value):
         return None
     try:
-        return float(str(value).replace(",", "").replace(" ", ""))
+        result = float(str(value).replace(",", "").replace(" ", ""))
+        if math.isnan(result):
+            return None
+        return result
     except (ValueError, TypeError):
         return None
 

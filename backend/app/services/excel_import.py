@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from app.services.normalize import build_normalized_text, clean_code, to_float
+from app.services.normalize import build_normalized_text, clean_code, to_float, is_missing
 
 
 # Maps canonical field name -> list of acceptable header aliases (lowercased).
@@ -80,7 +80,7 @@ def read_catalog_excel(file_path: str) -> List[dict]:
             return row[col] if col is not None and col in row else None
 
         name = get("name")
-        if name is None or str(name).strip() == "" or str(name).lower() == "nan":
+        if is_missing(name):
             continue  # skip blank rows
 
         code = clean_code(get("code"))
@@ -92,13 +92,18 @@ def read_catalog_excel(file_path: str) -> List[dict]:
 
         normalized_text = build_normalized_text(code, name, brand, model, description, technical_specs)
 
+        def _str_field(val) -> Optional[str]:
+            if is_missing(val):
+                return None
+            return str(val).strip()
+
         rows.append({
             "code": code,
-            "name": str(name).strip(),
-            "brand": str(brand).strip() if brand is not None and str(brand).lower() != "nan" else None,
-            "model": str(model).strip() if model is not None and str(model).lower() != "nan" else None,
-            "description": str(description).strip() if description is not None and str(description).lower() != "nan" else None,
-            "technical_specs": str(technical_specs).strip() if technical_specs is not None and str(technical_specs).lower() != "nan" else None,
+            "name": _str_field(name),
+            "brand": _str_field(brand),
+            "model": _str_field(model),
+            "description": _str_field(description),
+            "technical_specs": _str_field(technical_specs),
             "price": price,
             "normalized_text": normalized_text,
         })
@@ -125,7 +130,7 @@ def read_items_excel(file_path: str) -> List[dict]:
             return row[col] if col is not None and col in row else None
 
         item_name = get("item_name")
-        if item_name is None or str(item_name).strip() == "" or str(item_name).lower() == "nan":
+        if is_missing(item_name):
             continue
 
         item_code = clean_code(get("item_code"))
@@ -137,7 +142,7 @@ def read_items_excel(file_path: str) -> List[dict]:
         rows.append({
             "item_code": item_code,
             "item_name": str(item_name).strip(),
-            "description": str(description).strip() if description is not None and str(description).lower() != "nan" else None,
+            "description": None if is_missing(description) else str(description).strip(),
             "quantity": quantity,
             "normalized_text": normalized_text,
         })
