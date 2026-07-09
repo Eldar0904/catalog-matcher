@@ -51,6 +51,9 @@ class MatchingConfig:
     code_fuzzy_threshold: float = 0.80
     fuzzy_text_threshold: float = 0.55
 
+    use_category_filter: bool = True
+    infer_category_if_missing: bool = True
+
     @classmethod
     def from_request(
         cls,
@@ -63,6 +66,8 @@ class MatchingConfig:
         use_fuzzy_text: Optional[bool] = None,
         use_embeddings: Optional[bool] = None,
         embedding_model: Optional[str] = None,
+        use_category_filter: Optional[bool] = None,
+        infer_category_if_missing: Optional[bool] = None,
         **_,
     ) -> "MatchingConfig":
         mode = matching_mode if matching_mode in _MODE_DEFAULTS else "balanced"
@@ -78,6 +83,8 @@ class MatchingConfig:
             use_fuzzy_text=use_fuzzy_text if use_fuzzy_text is not None else defaults["use_fuzzy_text"],
             use_embeddings=use_embeddings if use_embeddings is not None else defaults["use_embeddings"],
             embedding_model=embedding_model or "paraphrase-multilingual-MiniLM-L12-v2",
+            use_category_filter=use_category_filter if use_category_filter is not None else True,
+            infer_category_if_missing=infer_category_if_missing if infer_category_if_missing is not None else True,
         )
         return cfg
 
@@ -104,4 +111,6 @@ class MatchingConfig:
             "use_fuzzy_text": self.use_fuzzy_text,
             "use_embeddings": self.use_embeddings,
             "embedding_model": self.embedding_model,
+            "use_category_filter": self.use_category_filter,
+            "infer_category_if_missing": self.infer_category_if_missing,
         }

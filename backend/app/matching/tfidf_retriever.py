@@ -17,6 +17,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import Session
 
 from app.matching.base import BaseRetriever, Candidate
+from app.matching.scope import allowed_product_ids, filter_ranked_pairs
 from app.models.db_models import CatalogProduct
 
 
@@ -58,7 +59,9 @@ class TfidfRetriever(BaseRetriever):
         item_vec = vectorizer.transform([item_normalized_text])
         sims = cosine_similarity(item_vec, matrix)[0]
 
-        ranked = sorted(zip(product_ids, sims), key=lambda x: x[1], reverse=True)[:k]
+        ranked = sorted(zip(product_ids, sims), key=lambda x: x[1], reverse=True)
+        allowed = allowed_product_ids(item)
+        ranked = filter_ranked_pairs(ranked, allowed)[:k]
         return [
             Candidate(
                 catalog_product_id=pid,

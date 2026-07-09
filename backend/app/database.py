@@ -24,6 +24,17 @@ def run_light_migrations():
             statements.append("ALTER TABLE catalog_products ADD COLUMN embedding_model VARCHAR(255)")
         else:
             statements.append("ALTER TABLE catalog_products ADD COLUMN embedding_model VARCHAR(255)")
+    if "category_code" not in existing:
+        statements.append("ALTER TABLE catalog_products ADD COLUMN category_code VARCHAR(64)")
+    if "category_name" not in existing:
+        statements.append("ALTER TABLE catalog_products ADD COLUMN category_name VARCHAR(500)")
+
+    if "internal_items" in insp.get_table_names():
+        item_cols = {c["name"] for c in insp.get_columns("internal_items")}
+        if "category_code" not in item_cols:
+            statements.append("ALTER TABLE internal_items ADD COLUMN category_code VARCHAR(64)")
+        if "category_name" not in item_cols:
+            statements.append("ALTER TABLE internal_items ADD COLUMN category_name VARCHAR(500)")
 
     if not statements:
         return

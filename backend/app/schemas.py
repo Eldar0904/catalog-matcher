@@ -12,6 +12,9 @@ class CatalogProductOut(BaseModel):
     technical_specs: Optional[str] = None
     price: Optional[float] = None
 
+    category_code: Optional[str] = None
+    category_name: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -37,6 +40,9 @@ class InternalItemOut(BaseModel):
     quantity: Optional[float] = None
     matches: List[MatchResultOut] = []
 
+    category_code: Optional[str] = None
+    category_name: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -58,6 +64,8 @@ class RunMatchingRequest(BaseModel):
     use_embeddings: Optional[bool] = None
     embedding_model: Optional[str] = None
     embed_catalog_if_missing: bool = True
+    use_category_filter: Optional[bool] = None
+    infer_category_if_missing: Optional[bool] = None
 
 
 class UploadResponse(BaseModel):
@@ -73,3 +81,9 @@ class CatalogSourceOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CategoryOut(BaseModel):
+    category_code: str
+    category_name: Optional[str] = None
+    product_count: int

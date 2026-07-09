@@ -58,6 +58,8 @@ export async function runMatching(options = {}) {
     useEmbeddings = null,
     embeddingModel = null,
     embedCatalogIfMissing = true,
+    useCategoryFilter = null,
+    inferCategoryIfMissing = null,
   } = options;
 
   const body = {
@@ -73,6 +75,8 @@ export async function runMatching(options = {}) {
   if (useFuzzyText != null) body.use_fuzzy_text = useFuzzyText;
   if (useEmbeddings != null) body.use_embeddings = useEmbeddings;
   if (embeddingModel != null) body.embedding_model = embeddingModel;
+  if (useCategoryFilter != null) body.use_category_filter = useCategoryFilter;
+  if (inferCategoryIfMissing != null) body.infer_category_if_missing = inferCategoryIfMissing;
 
   const res = await fetch(`${BASE}/match/run`, {
     method: "POST",

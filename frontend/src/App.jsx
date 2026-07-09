@@ -137,6 +137,11 @@ function ItemCard({ item, index, onSelect }) {
           {item.quantity != null && (
             <span className="item-tag">Кол-во: {item.quantity}</span>
           )}
+          {item.category_name && (
+            <span className="item-tag item-tag-category" title={item.category_code || ""}>
+              {item.category_name}
+            </span>
+          )}
         </div>
       </div>
 
@@ -196,6 +201,8 @@ export default function App() {
     topK: "",
     minScore: "",
     useEmbeddings: null,
+    useCategoryFilter: true,
+    inferCategory: true,
   });
   const [catalogStats, setCatalogStats] = useState({ productCount: 0, sourceName: "government" });
   const [lastCatalogImport, setLastCatalogImport] = useState(null);
@@ -263,6 +270,8 @@ export default function App() {
     if (advOpts.topK !== "") opts.topKCandidates = Number(advOpts.topK);
     if (advOpts.minScore !== "") opts.minSimilarityScore = Number(advOpts.minScore);
     if (advOpts.useEmbeddings !== null) opts.useEmbeddings = advOpts.useEmbeddings;
+    opts.useCategoryFilter = advOpts.useCategoryFilter;
+    opts.inferCategoryIfMissing = advOpts.inferCategory;
 
     const r = await runMatching(opts);
     toast("success", `Подбор завершён (${matchMode}) — ${r.items_processed} позиций`);
@@ -448,6 +457,22 @@ export default function App() {
                       <option value="1">вкл</option>
                       <option value="0">выкл</option>
                     </select>
+                  </label>
+                  <label className="adv-check">
+                    <input
+                      type="checkbox"
+                      checked={advOpts.useCategoryFilter}
+                      onChange={(e) => setAdvOpts({ ...advOpts, useCategoryFilter: e.target.checked })}
+                    />
+                    фильтр по категории
+                  </label>
+                  <label className="adv-check">
+                    <input
+                      type="checkbox"
+                      checked={advOpts.inferCategory}
+                      onChange={(e) => setAdvOpts({ ...advOpts, inferCategory: e.target.checked })}
+                    />
+                    угадывать категорию
                   </label>
                   {capabilities && !capabilities.embeddings_available && (
                     <span className="adv-hint">Семантика: установите sentence-transformers на backend</span>

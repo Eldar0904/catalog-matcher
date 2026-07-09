@@ -43,6 +43,10 @@ class CatalogProduct(Base):
     technical_specs = Column(Text)
     price = Column(Float, nullable=True)
 
+    # Category derived from government code prefix (e.g. 521-201) or Excel column
+    category_code = Column(String(64), index=True, nullable=True)
+    category_name = Column(String(500), nullable=True)
+
     # Normalized text used for matching (lowercased, cleaned, concatenated)
     normalized_text = Column(Text)
 
@@ -65,6 +69,9 @@ class InternalItem(Base):
     item_name = Column(String(1000))
     description = Column(Text)
     quantity = Column(Float, nullable=True)
+
+    category_code = Column(String(64), index=True, nullable=True)
+    category_name = Column(String(500), nullable=True)
 
     normalized_text = Column(Text)
 

@@ -51,7 +51,11 @@ def build_engine(
         retrievers[0] if len(retrievers) == 1 else HybridRetriever(retrievers)
     )
 
-    filter_ = DeterministicFilter(product_lookup, min_score=cfg.min_similarity_score)
+    filter_ = DeterministicFilter(
+        product_lookup,
+        min_score=cfg.min_similarity_score,
+        use_category_filter=cfg.use_category_filter,
+    )
     ranker = HeuristicRanker()
 
     return MatchingEngine(retriever=retriever, filter_=filter_, ranker=ranker)

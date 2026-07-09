@@ -10,6 +10,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import Session
 
 from app.matching.base import BaseRetriever, Candidate
+from app.matching.scope import allowed_product_ids, filter_ranked_pairs
 from app.models.db_models import CatalogProduct
 from app.services.embedding import encode_texts, embedding_text_for_product, parse_embedding
 
@@ -66,7 +67,9 @@ class EmbeddingRetriever(BaseRetriever):
         query_vec = encode_texts([query_text], self.model_name)
         sims = cosine_similarity(query_vec, matrix)[0]
 
-        ranked = sorted(zip(product_ids, sims), key=lambda x: x[1], reverse=True)[:k]
+        ranked = sorted(zip(product_ids, sims), key=lambda x: x[1], reverse=True)
+        allowed = allowed_product_ids(item)
+        ranked = filter_ranked_pairs(ranked, allowed)[:k]
         return [
             Candidate(
                 catalog_product_id=pid,

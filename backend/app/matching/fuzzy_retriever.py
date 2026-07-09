@@ -9,6 +9,7 @@ from typing import List
 from rapidfuzz import fuzz, process
 
 from app.matching.base import BaseRetriever, Candidate
+from app.matching.scope import allowed_product_ids, filter_candidates
 from app.models.db_models import CatalogProduct
 
 
@@ -40,10 +41,10 @@ class FuzzyTextRetriever(BaseRetriever):
             self._choices,
             scorer=fuzz.token_set_ratio,
             score_cutoff=self.score_cutoff * 100,
-            limit=k,
+            limit=k * 3 if allowed_product_ids(item) else k,
         )
 
-        return [
+        candidates = [
             Candidate(
                 catalog_product_id=pid,
                 score=score / 100.0,
@@ -51,3 +52,4 @@ class FuzzyTextRetriever(BaseRetriever):
             )
             for _, score, pid in hits
         ]
+        return filter_candidates(candidates, allowed_product_ids(item))[:k]

@@ -9,6 +9,13 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from app.services.normalize import build_normalized_text, clean_code, to_float, is_missing
+from app.services.category import extract_category_code
+
+
+def _str_field(val) -> Optional[str]:
+    if is_missing(val):
+        return None
+    return str(val).strip()
 
 
 # Maps canonical field name -> list of acceptable header aliases (lowercased).
@@ -35,6 +42,13 @@ CATALOG_HEADER_ALIASES: Dict[str, List[str]] = {
         "price", "unit price", "cost",
         "цена", "цена с ндс, в тенге", "цена с ндс", "цена, тенге", "стоимость",
     ],
+    "category": [
+        "category", "product category", "category_name",
+        "категория", "раздел", "группа", "классификатор",
+    ],
+    "category_code": [
+        "category code", "category_code", "код категории", "код раздела",
+    ],
 }
 
 ITEM_HEADER_ALIASES: Dict[str, List[str]] = {
@@ -45,6 +59,13 @@ ITEM_HEADER_ALIASES: Dict[str, List[str]] = {
     ],
     "description": ["description", "desc", "описание"],
     "quantity": ["quantity", "qty", "количество", "кол-во"],
+    "category": [
+        "category", "product category", "category_name",
+        "категория", "раздел", "группа",
+    ],
+    "category_code": [
+        "category code", "category_code", "код категории", "код раздела",
+    ],
 }
 
 
@@ -89,13 +110,10 @@ def read_catalog_excel(file_path: str) -> List[dict]:
         description = get("description")
         technical_specs = get("technical_specs")
         price = to_float(get("price"))
+        category_name = _str_field(get("category"))
+        category_code = _str_field(get("category_code")) or extract_category_code(code)
 
         normalized_text = build_normalized_text(code, name, brand, model, description, technical_specs)
-
-        def _str_field(val) -> Optional[str]:
-            if is_missing(val):
-                return None
-            return str(val).strip()
 
         rows.append({
             "code": code,
@@ -105,6 +123,8 @@ def read_catalog_excel(file_path: str) -> List[dict]:
             "description": _str_field(description),
             "technical_specs": _str_field(technical_specs),
             "price": price,
+            "category_code": category_code,
+            "category_name": category_name,
             "normalized_text": normalized_text,
         })
     return rows
@@ -136,6 +156,8 @@ def read_items_excel(file_path: str) -> List[dict]:
         item_code = clean_code(get("item_code"))
         description = get("description")
         quantity = to_float(get("quantity"))
+        category_name = _str_field(get("category"))
+        category_code = _str_field(get("category_code"))
 
         normalized_text = build_normalized_text(item_code, item_name, description)
 
@@ -144,6 +166,8 @@ def read_items_excel(file_path: str) -> List[dict]:
             "item_name": str(item_name).strip(),
             "description": None if is_missing(description) else str(description).strip(),
             "quantity": quantity,
+            "category_code": category_code,
+            "category_name": category_name,
             "normalized_text": normalized_text,
         })
     return rows

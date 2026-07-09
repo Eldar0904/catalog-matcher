@@ -13,11 +13,17 @@ from app.models.db_models import (
 )
 from app.schemas import (
     UploadResponse, RunMatchingRequest, SelectMatchRequest,
-    InternalItemOut, CatalogSourceOut,
+    InternalItemOut, CatalogSourceOut, CategoryOut,
 )
 from app.services.excel_import import read_catalog_excel, read_items_excel
 from app.services.export import export_results, export_results_batched
 from app.services.embedding import embed_catalog_source, embeddings_available
+from app.services.category import (
+    backfill_source_categories,
+    build_category_name_map,
+    product_ids_for_category,
+    resolve_item_category,
+)
 from app.matching.factory import build_engine
 from app.matching.matching_config import MatchingConfig
 
@@ -124,6 +130,8 @@ def upload_catalog(
         db.add(CatalogProduct(source_id=source.id, **row))
     db.commit()
 
+    categorized = backfill_source_categories(db, source.id)
+
     embedded = 0
     should_embed = (
         compute_embeddings
@@ -136,6 +144,8 @@ def upload_catalog(
     msg = f"Imported catalog '{source_name}'"
     if cleared_matches:
         msg += f"; cleared {cleared_matches} stale match(es)"
+    if categorized:
+        msg += f"; categorized {categorized} products"
     if embedded:
         msg += f"; embedded {embedded} products"
 
@@ -170,6 +180,33 @@ def upload_items(
     return UploadResponse(message="Imported internal items", rows_imported=len(rows))
 
 
+@router.get("/catalog/categories", response_model=list[CategoryOut])
+def list_catalog_categories(
+    source_name: str = Query(default="government"),
+    db: Session = Depends(get_db),
+):
+    """List distinct categories detected in a catalog source."""
+    source = db.query(CatalogSource).filter(CatalogSource.name == source_name).first()
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Catalog source '{source_name}' not found")
+
+    backfill_source_categories(db, source.id)
+    products = db.query(CatalogProduct).filter(CatalogProduct.source_id == source.id).all()
+    counts: dict[str, dict] = {}
+    for p in products:
+        if not p.category_code:
+            continue
+        entry = counts.setdefault(
+            p.category_code,
+            {"category_code": p.category_code, "category_name": p.category_name, "product_count": 0},
+        )
+        if p.category_name and not entry["category_name"]:
+            entry["category_name"] = p.category_name
+        entry["product_count"] += 1
+
+    return sorted(counts.values(), key=lambda x: x["category_code"])
+
+
 @router.post("/match/run")
 def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
     """
@@ -195,10 +232,20 @@ def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
         use_fuzzy_text=payload.use_fuzzy_text,
         use_embeddings=payload.use_embeddings,
         embedding_model=payload.embedding_model,
+        use_category_filter=payload.use_category_filter,
+        infer_category_if_missing=payload.infer_category_if_missing,
     )
 
     if match_cfg.use_embeddings and payload.embed_catalog_if_missing and embeddings_available():
         embed_catalog_source(db, source.id, model_name=match_cfg.embedding_model)
+
+    backfill_source_categories(db, source.id)
+    catalog_products = (
+        db.query(CatalogProduct)
+        .filter(CatalogProduct.source_id == source.id)
+        .all()
+    )
+    category_name_map = build_category_name_map(catalog_products)
 
     top_k = match_cfg.top_k_candidates
     top_n = match_cfg.top_n_results
@@ -221,22 +268,42 @@ def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
 
     processed = 0
     for item in items:
+        cat_code, cat_name, cat_note = resolve_item_category(
+            item,
+            category_name_map,
+            infer_if_missing=match_cfg.infer_category_if_missing,
+        )
+        if cat_code and (item.category_code != cat_code or item.category_name != cat_name):
+            item.category_code = cat_code
+            item.category_name = cat_name
+
+        allowed_ids = None
+        if match_cfg.use_category_filter and cat_code:
+            allowed = product_ids_for_category(catalog_products, cat_code)
+            allowed_ids = list(allowed) if allowed else None
+
         item_dict = {
             "item_code": item.item_code,
             "item_name": item.item_name,
             "description": item.description,
             "normalized_text": item.normalized_text,
+            "category_code": cat_code,
+            "category_name": cat_name,
+            "allowed_product_ids": allowed_ids,
         }
         candidates = engine.match_item(item_dict, source.id, top_k, top_n)
 
         for rank, cand in enumerate(candidates, start=1):
+            explanation = cand.explanation
+            if cat_note and rank == 1:
+                explanation = f"{explanation}; {cat_note}"
             db.add(MatchResult(
                 item_id=item.id,
                 catalog_product_id=cand.catalog_product_id,
                 rank=rank,
                 confidence_score=cand.score,
-                explanation=cand.explanation,
-                is_selected=1 if rank == 1 else 0,  # default: auto-select best match
+                explanation=explanation,
+                is_selected=1 if rank == 1 and len(candidates) > 0 else 0,
                 is_manual_override=0,
             ))
         processed += 1
@@ -263,6 +330,8 @@ def list_items(db: Session = Depends(get_db)):
             item_name=item.item_name,
             description=item.description,
             quantity=item.quantity,
+            category_code=item.category_code,
+            category_name=item.category_name,
             matches=[
                 {
                     "id": m.id,
