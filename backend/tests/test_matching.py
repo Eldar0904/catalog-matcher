@@ -36,3 +36,20 @@ def test_matching_config_overrides():
     cfg = MatchingConfig.from_request("fast", use_embeddings=True, top_k_candidates=80)
     assert cfg.use_embeddings is True
     assert cfg.top_k_candidates == 80
+
+
+def test_code_retriever_fuzzy_does_not_crash():
+    from types import SimpleNamespace
+    from app.matching.code_retriever import CodeRetriever
+
+    products = [
+        SimpleNamespace(id=1, code="TM-001"),
+        SimpleNamespace(id=2, code="TM-002"),
+    ]
+    retriever = CodeRetriever(products)
+    hits = retriever.get_top_k(
+        {"item_code": "TM001", "item_name": "test", "normalized_text": "test"},
+        source_id=1,
+        k=5,
+    )
+    assert isinstance(hits, list)

@@ -8,9 +8,24 @@
 
 ## Запуск
 
+### Без терминала (Windows)
+
+Дважды щёлкните в проводнике:
+
+1. **`scripts\start-all.bat`** — запускает backend + frontend и открывает браузер
+2. Или по отдельности: `scripts\start-backend.bat` и `scripts\start-frontend.bat`
+
+Окна с серверами **не закрывайте**, пока работаете с приложением.
+
+В **Cursor / VS Code**: `Terminal` → `Run Task` → **Catalog Matcher: Start All**
+
+### Через Docker
+
 ```bash
 docker compose up --build
 ```
+
+Или в **Docker Desktop**: Open folder → выбрать проект → Run compose.
 
 - Фронтенд: http://localhost:5173
 - Документация backend API: http://localhost:8000/docs

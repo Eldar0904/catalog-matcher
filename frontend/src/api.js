@@ -33,6 +33,12 @@ export async function uploadItems(file) {
   return res.json();
 }
 
+export async function fetchCatalogSources() {
+  const res = await fetch(`${BASE}/catalog-sources`);
+  await handle(res);
+  return res.json();
+}
+
 export async function fetchMatchCapabilities() {
   const res = await fetch(`${BASE}/match/capabilities`);
   await handle(res);

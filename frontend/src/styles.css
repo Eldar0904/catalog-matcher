@@ -81,6 +81,7 @@ body { background: var(--bg); }
 .step-label {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   font-size: 11.5px;
   font-weight: 600;
@@ -217,6 +218,72 @@ body { background: var(--bg); }
 .status-bar.error   { background: var(--red-bg);   color: var(--red); }
 
 /* ── Stats strip ───────────────────────────────────────────────── */
+.step-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.step-badge-catalog {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.step-badge-items {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.data-summary {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.data-summary-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.data-summary-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 700px) {
+  .data-summary-row { grid-template-columns: 1fr; }
+}
+.data-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--bg);
+}
+.data-card.ok { border-color: #93c5fd; }
+.data-card.empty { opacity: 0.7; }
+.data-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.data-card-value {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--navy);
+}
+.data-card-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 6px;
+  word-break: break-word;
+}
+
 .stats-strip {
   display: flex;
   gap: 12px;

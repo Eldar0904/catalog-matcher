@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   uploadCatalog, uploadItems, runMatching, fetchItems,
   selectMatch, searchCatalogProducts, exportResults, exportResultsBatched,
-  fetchMatchCapabilities,
+  fetchMatchCapabilities, fetchCatalogSources,
 } from "./api.js";
 
 const BEST_MATCH_THRESHOLD = 0.8;
@@ -197,6 +197,9 @@ export default function App() {
     minScore: "",
     useEmbeddings: null,
   });
+  const [catalogStats, setCatalogStats] = useState({ productCount: 0, sourceName: "government" });
+  const [lastCatalogImport, setLastCatalogImport] = useState(null);
+  const [lastItemsImport, setLastItemsImport] = useState(null);
 
   const toast = (type, text) => {
     setStatus({ type, text });
@@ -204,7 +207,16 @@ export default function App() {
   };
 
   const load = useCallback(async () => {
-    try { setItems(await fetchItems()); }
+    try {
+      setItems(await fetchItems());
+      const sources = await fetchCatalogSources();
+      const gov = sources.find((s) => s.name === "government") || sources[0];
+      if (gov) {
+        setCatalogStats({ productCount: gov.product_count, sourceName: gov.name });
+      } else {
+        setCatalogStats({ productCount: 0, sourceName: "government" });
+      }
+    }
     catch (e) { toast("error", e.message); }
   }, []);
 
@@ -229,17 +241,24 @@ export default function App() {
   const handleUploadCatalog = () => wrap(async () => {
     if (!catalogFile) return;
     const r = await uploadCatalog(catalogFile);
+    setLastCatalogImport({ rows: r.rows_imported, name: catalogFile.name });
     toast("success", `${r.message} — ${r.rows_imported} строк`);
+    await load();
   });
 
   const handleUploadItems = () => wrap(async () => {
     if (!itemsFile) return;
     const r = await uploadItems(itemsFile);
+    setLastItemsImport({ rows: r.rows_imported, name: itemsFile.name });
     toast("success", `${r.message} — ${r.rows_imported} строк`);
     await load();
   });
 
   const handleRunMatching = () => wrap(async () => {
+    if (catalogStats.productCount === 0) {
+      toast("error", "Сначала загрузите каталог");
+      return;
+    }
     const opts = { matchingMode: matchMode };
     if (advOpts.topK !== "") opts.topKCandidates = Number(advOpts.topK);
     if (advOpts.minScore !== "") opts.minSimilarityScore = Number(advOpts.minScore);
@@ -268,7 +287,10 @@ export default function App() {
   });
 
   // ── Stats ──────────────────────────────────────────────────────
-  const total     = items.length;
+  const total        = items.length;
+  const catalogCount = catalogStats.productCount;
+  const itemsCount   = total;
+  const hasData      = catalogCount > 0 || itemsCount > 0;
   const matched   = items.filter(i =>
     i.matches.some(m => m.is_selected && m.confidence_score >= BEST_MATCH_THRESHOLD)).length;
   const needsWork = items.filter(i =>
@@ -300,7 +322,7 @@ export default function App() {
         <div className="header-right">
           {loading && <div className="spinner" />}
           <span style={{ fontSize: 12, color: "rgba(255,255,255,.5)" }}>
-            {total} позиций загружено
+            каталог: {catalogCount} · позиции: {itemsCount}
           </span>
         </div>
       </header>
@@ -314,6 +336,9 @@ export default function App() {
             <div className="step-body">
               <div className="step-label">
                 <span className="step-num">1</span>Каталог (.xlsx)
+                {catalogCount > 0 && (
+                  <span className="step-badge step-badge-catalog">{catalogCount} в БД</span>
+                )}
               </div>
               <div className="step-controls">
                 <FileButton label="Выбрать файл" file={catalogFile} onChange={setCatalogFile} />
@@ -331,6 +356,9 @@ export default function App() {
             <div className="step-body">
               <div className="step-label">
                 <span className="step-num">2</span>Наши позиции (.xlsx)
+                {itemsCount > 0 && (
+                  <span className="step-badge step-badge-items">{itemsCount} в БД</span>
+                )}
               </div>
               <div className="step-controls">
                 <FileButton label="Выбрать файл" file={itemsFile} onChange={setItemsFile} />
@@ -462,13 +490,40 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Stats strip ── */}
-        {total > 0 && (
+        {/* ── Loaded data summary ── */}
+        {hasData && (
+          <div className="data-summary">
+            <div className="data-summary-title">Загружено в базу</div>
+            <div className="data-summary-row">
+              <div className={`data-card ${catalogCount > 0 ? "ok" : "empty"}`}>
+                <div className="data-card-label">Каталог (шаг 1)</div>
+                <div className="data-card-value">{catalogCount || "—"}</div>
+                <div className="data-card-hint">
+                  {lastCatalogImport
+                    ? `${lastCatalogImport.name}: ${lastCatalogImport.rows} строк`
+                    : catalogCount > 0 ? "готов к сопоставлению" : "загрузите файл"}
+                </div>
+              </div>
+              <div className={`data-card ${itemsCount > 0 ? "ok" : "empty"}`}>
+                <div className="data-card-label">Наши позиции (шаг 2)</div>
+                <div className="data-card-value">{itemsCount || "—"}</div>
+                <div className="data-card-hint">
+                  {lastItemsImport
+                    ? `${lastItemsImport.name}: ${lastItemsImport.rows} строк`
+                    : itemsCount > 0 ? "готов к сопоставлению" : "загрузите файл"}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Matching results stats ── */}
+        {itemsCount > 0 && (
           <div className="stats-strip">
             <div className="stat-pill">
               <div>
-                <div className="sv">{total}</div>
-                <div className="sl">Всего позиций</div>
+                <div className="sv">{itemsCount}</div>
+                <div className="sl">Позиций для подбора</div>
               </div>
             </div>
             <div className="stat-pill green">
@@ -511,7 +566,11 @@ export default function App() {
         )}
 
         {/* ── Items list ── */}
-        {total === 0 ? (
+        {itemsCount === 0 && catalogCount > 0 ? (
+          <div className="empty-state">
+            <p>Каталог загружен ({catalogCount} товаров). Загрузите список позиций (шаг 2).</p>
+          </div>
+        ) : itemsCount === 0 ? (
           <div className="empty-state">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
               stroke="#94a3b8" strokeWidth="1.5">
