@@ -1,15 +1,16 @@
 """
-Fuzzy text retrieval over product names using rapidfuzz token_set_ratio.
+Fuzzy text retrieval over product names.
 
-Catches near-duplicate wording that TF-IDF may rank too low when catalog
-rows have long technical_specs bloating the vector.
+Uses a conservative scorer (not plain token_set_ratio) to avoid 100% matches
+on generic header words like «Мебель».
 """
 from typing import List
 
-from rapidfuzz import fuzz, process
+from rapidfuzz import process
 
 from app.matching.base import BaseRetriever, Candidate
-from app.matching.scope import allowed_product_ids, filter_candidates
+from app.matching.scope import allowed_product_ids, blocked_product_ids, filter_candidates
+from app.matching.text_similarity import fuzzy_name_score
 from app.models.db_models import CatalogProduct
 
 
@@ -36,20 +37,23 @@ class FuzzyTextRetriever(BaseRetriever):
         if not query or not self._choices:
             return []
 
-        hits = process.extract(
-            query,
-            self._choices,
-            scorer=fuzz.token_set_ratio,
-            score_cutoff=self.score_cutoff * 100,
-            limit=k * 3 if allowed_product_ids(item) else k,
-        )
+        allowed = allowed_product_ids(item)
+        blocked = blocked_product_ids(item)
+        limit = k * 5 if (allowed is not None or blocked) else k * 2
 
+        scored: List[tuple] = []
+        for pid, label in self._choices.items():
+            score = fuzzy_name_score(query, label)
+            if score >= self.score_cutoff:
+                scored.append((pid, score))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
         candidates = [
             Candidate(
                 catalog_product_id=pid,
-                score=score / 100.0,
-                explanation=f"fuzzy name match ({score / 100.0:.3f})",
+                score=score,
+                explanation=f"fuzzy name match ({score:.3f})",
             )
-            for _, score, pid in hits
+            for pid, score in scored[:limit]
         ]
-        return filter_candidates(candidates, allowed_product_ids(item))[:k]
+        return filter_candidates(candidates, allowed, blocked)[:k]

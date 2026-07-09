@@ -9,7 +9,7 @@ from typing import Dict, List
 from rapidfuzz import fuzz, process
 
 from app.matching.base import BaseRetriever, Candidate
-from app.matching.scope import allowed_product_ids, filter_candidates
+from app.matching.scope import allowed_product_ids, blocked_product_ids, filter_candidates
 from app.models.db_models import CatalogProduct
 
 
@@ -67,4 +67,6 @@ class CodeRetriever(BaseRetriever):
                     )
 
         ranked = sorted(seen.values(), key=lambda c: c.score, reverse=True)
-        return filter_candidates(ranked, allowed_product_ids(item))[:k]
+        return filter_candidates(
+            ranked, allowed_product_ids(item), blocked_product_ids(item),
+        )[:k]

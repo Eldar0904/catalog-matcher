@@ -1,24 +1,28 @@
 """
 Semantic retriever using precomputed product embeddings.
-
-Falls back gracefully when embeddings are missing for some/all products.
 """
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import Session
 
 from app.matching.base import BaseRetriever, Candidate
-from app.matching.scope import allowed_product_ids, filter_ranked_pairs
+from app.matching.scope import allowed_product_ids, blocked_product_ids, filter_ranked_pairs
 from app.models.db_models import CatalogProduct
-from app.services.embedding import encode_texts, embedding_text_for_product, parse_embedding
+from app.services.embedding import encode_texts, parse_embedding
 
 
 class EmbeddingRetriever(BaseRetriever):
-    def __init__(self, db: Session, model_name: str):
+    def __init__(
+        self,
+        db: Session,
+        model_name: str,
+        product_ids: Optional[Set[int]] = None,
+    ):
         self.db = db
         self.model_name = model_name
+        self.product_ids = product_ids
         self._cache: Dict[int, Tuple[np.ndarray, List[int]]] = {}
 
     def _build_index(self, source_id: int):
@@ -27,6 +31,9 @@ class EmbeddingRetriever(BaseRetriever):
             .filter(CatalogProduct.source_id == source_id)
             .all()
         )
+        if self.product_ids is not None:
+            products = [p for p in products if p.id in self.product_ids]
+
         ids: List[int] = []
         rows: List[np.ndarray] = []
         for p in products:
@@ -35,11 +42,7 @@ class EmbeddingRetriever(BaseRetriever):
                 ids.append(p.id)
                 rows.append(vec)
 
-        if rows:
-            matrix = np.vstack(rows)
-        else:
-            matrix = None
-
+        matrix = np.vstack(rows) if rows else None
         self._cache[source_id] = (matrix, ids)
 
     def invalidate(self, source_id: int):
@@ -68,8 +71,9 @@ class EmbeddingRetriever(BaseRetriever):
         sims = cosine_similarity(query_vec, matrix)[0]
 
         ranked = sorted(zip(product_ids, sims), key=lambda x: x[1], reverse=True)
-        allowed = allowed_product_ids(item)
-        ranked = filter_ranked_pairs(ranked, allowed)[:k]
+        ranked = filter_ranked_pairs(
+            ranked, allowed_product_ids(item), blocked_product_ids(item),
+        )[:k]
         return [
             Candidate(
                 catalog_product_id=pid,

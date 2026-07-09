@@ -24,6 +24,7 @@ from app.services.category import (
     product_ids_for_category,
     resolve_item_category,
 )
+from app.services.domain import blocked_product_ids_for_item, is_medical_item
 from app.matching.factory import build_engine
 from app.matching.matching_config import MatchingConfig
 
@@ -282,6 +283,10 @@ def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
             allowed = product_ids_for_category(catalog_products, cat_code)
             allowed_ids = list(allowed) if allowed else None
 
+        blocked_ids = list(blocked_product_ids_for_item(
+            item.item_name or "", item.description or "", catalog_products,
+        ))
+
         item_dict = {
             "item_code": item.item_code,
             "item_name": item.item_name,
@@ -290,20 +295,27 @@ def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
             "category_code": cat_code,
             "category_name": cat_name,
             "allowed_product_ids": allowed_ids,
+            "blocked_product_ids": blocked_ids,
         }
         candidates = engine.match_item(item_dict, source.id, top_k, top_n)
 
+        if is_medical_item(item.item_name or "", item.description or ""):
+            if not candidates or candidates[0].score < 0.75:
+                candidates = []
+
+        auto_threshold = settings.auto_select_min_confidence
         for rank, cand in enumerate(candidates, start=1):
             explanation = cand.explanation
             if cat_note and rank == 1:
                 explanation = f"{explanation}; {cat_note}"
+            auto_select = rank == 1 and cand.score >= auto_threshold
             db.add(MatchResult(
                 item_id=item.id,
                 catalog_product_id=cand.catalog_product_id,
                 rank=rank,
                 confidence_score=cand.score,
                 explanation=explanation,
-                is_selected=1 if rank == 1 and len(candidates) > 0 else 0,
+                is_selected=1 if auto_select else 0,
                 is_manual_override=0,
             ))
         processed += 1

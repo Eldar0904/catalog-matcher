@@ -18,6 +18,12 @@ from typing import Optional
 from app.matching.matching_config import MatchingConfig
 from app.models.db_models import CatalogProduct
 from app.services.embedding import embeddings_available
+from app.services.category import is_category_header_code
+
+
+def matchable_products(products: list[CatalogProduct]) -> list[CatalogProduct]:
+    """Exclude section header rows — they are category titles, not products."""
+    return [p for p in products if not is_category_header_code(p.code)]
 
 
 def build_engine(
@@ -28,24 +34,28 @@ def build_engine(
     cfg = config or MatchingConfig.from_request("balanced")
 
     products = db.query(CatalogProduct).filter(CatalogProduct.source_id == source_id).all()
+    matchable = matchable_products(products)
+    matchable_ids = {p.id for p in matchable}
     product_lookup = {p.id: p for p in products}
 
     retrievers: list[BaseRetriever] = []
 
     if cfg.use_code_matching:
-        retrievers.append(CodeRetriever(products, fuzzy_threshold=cfg.code_fuzzy_threshold))
+        retrievers.append(CodeRetriever(matchable, fuzzy_threshold=cfg.code_fuzzy_threshold))
 
     if cfg.use_tfidf:
-        retrievers.append(TfidfRetriever(db))
+        retrievers.append(TfidfRetriever(db, product_ids=matchable_ids))
 
     if cfg.use_fuzzy_text:
-        retrievers.append(FuzzyTextRetriever(products, score_cutoff=cfg.fuzzy_text_threshold))
+        retrievers.append(FuzzyTextRetriever(matchable, score_cutoff=cfg.fuzzy_text_threshold))
 
     if cfg.use_embeddings and embeddings_available():
-        retrievers.append(EmbeddingRetriever(db, model_name=cfg.embedding_model))
+        retrievers.append(
+            EmbeddingRetriever(db, model_name=cfg.embedding_model, product_ids=matchable_ids)
+        )
 
     if not retrievers:
-        retrievers.append(TfidfRetriever(db))
+        retrievers.append(TfidfRetriever(db, product_ids=matchable_ids))
 
     retriever: BaseRetriever = (
         retrievers[0] if len(retrievers) == 1 else HybridRetriever(retrievers)

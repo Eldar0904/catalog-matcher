@@ -62,6 +62,10 @@ class DeterministicFilter(BaseFilter):
             ):
                 continue
 
+            blocked = item.get("blocked_product_ids") or []
+            if c.catalog_product_id in blocked and not code_matched:
+                continue
+
             # Rule: drop anything below the minimum similarity floor
             # (code matches are always kept — they are strong deterministic signals)
             if score < self.min_score and not c.code_matched:

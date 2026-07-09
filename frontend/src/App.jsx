@@ -9,8 +9,8 @@ const BEST_MATCH_THRESHOLD = 0.8;
 const BATCH_SIZE = 100;
 
 function tier(score) {
-  if (score >= 0.6) return "high";
-  if (score >= 0.3) return "medium";
+  if (score >= 0.85) return "high";
+  if (score >= 0.55) return "medium";
   return "low";
 }
 
@@ -115,6 +115,11 @@ function MatchOption({ match, rank, itemId, onSelect }) {
       {match.is_manual_override && (
         <div style={{ fontSize: 10.5, color: "#7c3aed", fontWeight: 600, marginTop: 2 }}>
           ✦ Выбрано вручную
+        </div>
+      )}
+      {!match.is_selected && rank === 1 && (
+        <div style={{ fontSize: 10.5, color: "#b45309", fontWeight: 600, marginTop: 2 }}>
+          ⚠ Низкая уверенность — выберите вручную
         </div>
       )}
     </label>
