@@ -15,6 +15,7 @@ from rapidfuzz import fuzz
 
 from app.matching.base import BaseFilter, Candidate
 from app.config import settings
+from app.services.category import looks_like_catalog_code
 
 
 class DeterministicFilter(BaseFilter):
@@ -46,7 +47,11 @@ class DeterministicFilter(BaseFilter):
                 score = max(score, 0.95)
                 explanation += "; exact code match"
                 code_matched = True
-            elif item_code and product.code:
+            elif (
+                item_code
+                and product.code
+                and looks_like_catalog_code(item_code)
+            ):
                 code_sim = fuzz.ratio(item_code, product.code) / 100.0
                 if code_sim > 0.8:
                     score = max(score, min(0.9, score + 0.2))

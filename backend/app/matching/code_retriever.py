@@ -11,6 +11,7 @@ from rapidfuzz import fuzz, process
 from app.matching.base import BaseRetriever, Candidate
 from app.matching.scope import allowed_product_ids, blocked_product_ids, filter_candidates
 from app.models.db_models import CatalogProduct
+from app.services.category import looks_like_catalog_code
 
 
 class CodeRetriever(BaseRetriever):
@@ -46,7 +47,7 @@ class CodeRetriever(BaseRetriever):
                 code_matched=True,
             )
 
-        if self._codes and len(seen) < k:
+        if self._codes and len(seen) < k and looks_like_catalog_code(item_code):
             fuzzy_hits = process.extract(
                 item_code,
                 self._codes,

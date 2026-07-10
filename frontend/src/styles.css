@@ -611,6 +611,38 @@ body { background: var(--bg); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Match progress ─────────────────────────────────────────────── */
+.match-progress-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,.85);
+  font-variant-numeric: tabular-nums;
+}
+.match-progress-bar {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.match-progress-track {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.match-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #22c55e);
+  border-radius: 4px;
+  transition: width .4s ease;
+}
+.match-progress-text {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* ── Scrollbar ─────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

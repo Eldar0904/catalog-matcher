@@ -6,8 +6,6 @@ on generic header words like «Мебель».
 """
 from typing import List
 
-from rapidfuzz import process
-
 from app.matching.base import BaseRetriever, Candidate
 from app.matching.scope import allowed_product_ids, blocked_product_ids, filter_candidates
 from app.matching.text_similarity import fuzzy_name_score
@@ -43,6 +41,10 @@ class FuzzyTextRetriever(BaseRetriever):
 
         scored: List[tuple] = []
         for pid, label in self._choices.items():
+            if blocked and pid in blocked:
+                continue
+            if allowed is not None and pid not in allowed:
+                continue
             score = fuzzy_name_score(query, label)
             if score >= self.score_cutoff:
                 scored.append((pid, score))

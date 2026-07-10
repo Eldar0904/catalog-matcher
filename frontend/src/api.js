@@ -9,15 +9,19 @@ async function handle(res) {
     } catch {
       /* ignore */
     }
-    throw new Error(detail);
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
   }
   return res;
 }
 
-export async function uploadCatalog(file, sourceName = "government") {
+export async function uploadCatalog(file, sourceName = "government", computeEmbeddings = false) {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/upload/catalog?source_name=${encodeURIComponent(sourceName)}`, {
+  const qs = new URLSearchParams({ source_name: sourceName });
+  if (computeEmbeddings) qs.set("compute_embeddings", "true");
+  const res = await fetch(`${BASE}/upload/catalog?${qs.toString()}`, {
     method: "POST",
     body: form,
   });
@@ -41,6 +45,18 @@ export async function fetchCatalogSources() {
 
 export async function fetchMatchCapabilities() {
   const res = await fetch(`${BASE}/match/capabilities`);
+  await handle(res);
+  return res.json();
+}
+
+export async function fetchMatchStatus() {
+  const res = await fetch(`${BASE}/match/status`);
+  await handle(res);
+  return res.json();
+}
+
+export async function cancelMatching() {
+  const res = await fetch(`${BASE}/match/cancel`, { method: "POST" });
   await handle(res);
   return res.json();
 }

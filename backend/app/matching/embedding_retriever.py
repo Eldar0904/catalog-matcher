@@ -24,6 +24,7 @@ class EmbeddingRetriever(BaseRetriever):
         self.model_name = model_name
         self.product_ids = product_ids
         self._cache: Dict[int, Tuple[np.ndarray, List[int]]] = {}
+        self._query_cache: Dict[str, np.ndarray] = {}
 
     def _build_index(self, source_id: int):
         products = (
@@ -67,7 +68,9 @@ class EmbeddingRetriever(BaseRetriever):
         if not query_text.strip():
             return []
 
-        query_vec = encode_texts([query_text], self.model_name)
+        if query_text not in self._query_cache:
+            self._query_cache[query_text] = encode_texts([query_text], self.model_name)[0]
+        query_vec = self._query_cache[query_text].reshape(1, -1)
         sims = cosine_similarity(query_vec, matrix)[0]
 
         ranked = sorted(zip(product_ids, sims), key=lambda x: x[1], reverse=True)

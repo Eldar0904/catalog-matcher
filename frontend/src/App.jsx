@@ -1,12 +1,22 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  uploadCatalog, uploadItems, runMatching, fetchItems,
+  uploadCatalog, uploadItems, runMatching, cancelMatching, fetchMatchStatus, fetchItems,
   selectMatch, searchCatalogProducts, exportResults, exportResultsBatched,
   fetchMatchCapabilities, fetchCatalogSources,
 } from "./api.js";
 
 const BEST_MATCH_THRESHOLD = 0.8;
 const BATCH_SIZE = 100;
+
+function isMatchRunFinished(st) {
+  if (!st || st.status === "idle" || st.status === "complete" || st.status === "cancelled") {
+    return true;
+  }
+  const total = st.items_total || 0;
+  const processed = st.items_processed || 0;
+  if (total > 0 && processed >= total) return true;
+  return false;
+}
 
 function tier(score) {
   if (score >= 0.70) return "high";
@@ -198,6 +208,7 @@ export default function App() {
   const [items,       setItems]       = useState([]);
   const [status,      setStatus]      = useState(null);
   const [loading,     setLoading]     = useState(false);
+  const [busyAction,  setBusyAction]  = useState(null); // catalog | items | match | export
   const [filter,      setFilter]      = useState("all");
   const [matchMode,   setMatchMode]   = useState("balanced");
   const [capabilities, setCapabilities] = useState(null);
@@ -210,8 +221,23 @@ export default function App() {
     inferCategory: true,
   });
   const [catalogStats, setCatalogStats] = useState({ productCount: 0, sourceName: "government" });
-  const [lastCatalogImport, setLastCatalogImport] = useState(null);
-  const [lastItemsImport, setLastItemsImport] = useState(null);
+  const [lastCatalogImport, setLastCatalogImport] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem("catalogMatcher.lastCatalogImport");
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  });
+  const [lastItemsImport, setLastItemsImport] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem("catalogMatcher.lastItemsImport");
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  });
+  const [matchProgress, setMatchProgress] = useState(null); // { processed, total, runId }
+  const [matchingActive, setMatchingActive] = useState(false);
+  const pollRef = useRef(null);
+  const completedRunRef = useRef(null);
+  const startPollingRef = useRef(null);
 
   const toast = (type, text) => {
     setStatus({ type, text });
@@ -234,6 +260,93 @@ export default function App() {
 
   useEffect(() => { load(); }, [load]);
 
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  const pollMatchProgress = useCallback(async () => {
+    const st = await fetchMatchStatus();
+    if (!isMatchRunFinished(st)) {
+      setMatchProgress({
+        processed: st.items_processed || 0,
+        total: st.items_total || 0,
+        runId: st.run_id,
+      });
+      setMatchingActive(true);
+      setItems(await fetchItems());
+      return st;
+    }
+    setMatchProgress(null);
+    setMatchingActive(false);
+    setItems(await fetchItems());
+    return st;
+  }, []);
+
+  const startPolling = useCallback((onComplete) => {
+    stopPolling();
+    const tick = async () => {
+      try {
+        const st = await pollMatchProgress();
+        if (isMatchRunFinished(st)) {
+          stopPolling();
+          if (onComplete && completedRunRef.current !== st.run_id) {
+            completedRunRef.current = st.run_id;
+            onComplete(st);
+          }
+        }
+      } catch (e) {
+        stopPolling();
+        setMatchingActive(false);
+        setMatchProgress(null);
+        toast("error", e.message);
+      }
+    };
+    tick();
+    pollRef.current = setInterval(tick, 2500);
+  }, [pollMatchProgress, stopPolling]);
+
+  startPollingRef.current = startPolling;
+
+  const syncMatchingState = useCallback(async ({ notify = false } = {}) => {
+    try {
+      const st = await fetchMatchStatus();
+      if (!isMatchRunFinished(st)) {
+        setMatchProgress({
+          processed: st.items_processed || 0,
+          total: st.items_total || 0,
+          runId: st.run_id,
+        });
+        setMatchingActive(true);
+        setItems(await fetchItems());
+        startPollingRef.current?.((done) => {
+          toast("success", `Подбор завершён — ${done.items_processed} позиций`);
+        });
+        if (notify) {
+          toast(
+            "success",
+            `Сопоставление уже идёт — ${st.items_processed} / ${st.items_total}`,
+          );
+        }
+        return true;
+      }
+      setMatchingActive(false);
+      setMatchProgress(null);
+      stopPolling();
+      return false;
+    } catch {
+      return false;
+    }
+  }, [stopPolling]);
+
+  useEffect(() => {
+    syncMatchingState();
+    return () => stopPolling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
+
   useEffect(() => {
     fetchMatchCapabilities()
       .then((c) => {
@@ -243,45 +356,106 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const wrap = async (fn) => {
+  const wrap = async (action, fn) => {
     setLoading(true);
+    setBusyAction(action);
     try { await fn(); }
     catch (e) { toast("error", e.message); }
-    finally { setLoading(false); }
+    finally {
+      setLoading(false);
+      setBusyAction(null);
+    }
   };
 
-  const handleUploadCatalog = () => wrap(async () => {
+  const handleUploadCatalog = () => wrap("catalog", async () => {
     if (!catalogFile) return;
-    const r = await uploadCatalog(catalogFile);
-    setLastCatalogImport({ rows: r.rows_imported, name: catalogFile.name });
-    toast("success", `${r.message} — ${r.rows_imported} строк`);
+    const r = await uploadCatalog(catalogFile, "government", false);
+    const info = { rows: r.rows_imported, name: catalogFile.name };
+    setLastCatalogImport(info);
+    sessionStorage.setItem("catalogMatcher.lastCatalogImport", JSON.stringify(info));
+    toast("success", `Каталог загружен — ${r.rows_imported} строк. Нажмите «Запустить», когда будете готовы.`);
     await load();
   });
 
-  const handleUploadItems = () => wrap(async () => {
+  const handleUploadItems = () => wrap("items", async () => {
     if (!itemsFile) return;
     const r = await uploadItems(itemsFile);
-    setLastItemsImport({ rows: r.rows_imported, name: itemsFile.name });
-    toast("success", `${r.message} — ${r.rows_imported} строк`);
+    const info = { rows: r.rows_imported, name: itemsFile.name };
+    setLastItemsImport(info);
+    sessionStorage.setItem("catalogMatcher.lastItemsImport", JSON.stringify(info));
+    toast("success", `Позиции загружены — ${r.rows_imported} строк. Сопоставление не запущено.`);
     await load();
   });
 
-  const handleRunMatching = () => wrap(async () => {
-    if (catalogStats.productCount === 0) {
+  const handleCancelMatching = async () => {
+    try {
+      const r = await cancelMatching();
+      if (r.status === "idle") {
+        toast("error", "Нет активного сопоставления");
+        return;
+      }
+      stopPolling();
+      setMatchingActive(false);
+      setMatchProgress(null);
+      await load();
+      toast("success", `Остановлено на ${r.items_processed} из ${r.items_total} позиций`);
+    } catch (e) {
+      toast("error", e.message);
+    }
+  };
+
+  const handleRunMatching = async () => {
+    if (matchingActive) {
+      toast("error", "Сопоставление уже выполняется");
+      return;
+    }
+    if (!catalogReady && catalogStats.productCount === 0) {
       toast("error", "Сначала загрузите каталог");
       return;
     }
-    const opts = { matchingMode: matchMode };
-    if (advOpts.topK !== "") opts.topKCandidates = Number(advOpts.topK);
-    if (advOpts.minScore !== "") opts.minSimilarityScore = Number(advOpts.minScore);
-    if (advOpts.useEmbeddings !== null) opts.useEmbeddings = advOpts.useEmbeddings;
-    opts.useCategoryFilter = advOpts.useCategoryFilter;
-    opts.inferCategoryIfMissing = advOpts.inferCategory;
+    if (!itemsReady) {
+      toast("error", "Сначала загрузите список позиций (шаг 2)");
+      return;
+    }
+    completedRunRef.current = null;
+    setLoading(true);
+    setMatchingActive(true);
+    try {
+      const opts = { matchingMode: matchMode };
+      if (advOpts.topK !== "") opts.topKCandidates = Number(advOpts.topK);
+      if (advOpts.minScore !== "") opts.minSimilarityScore = Number(advOpts.minScore);
+      if (advOpts.useEmbeddings !== null) opts.useEmbeddings = advOpts.useEmbeddings;
+      opts.useCategoryFilter = advOpts.useCategoryFilter;
+      opts.inferCategoryIfMissing = advOpts.inferCategory;
 
-    const r = await runMatching(opts);
-    toast("success", `Подбор завершён (${matchMode}) — ${r.items_processed} позиций`);
-    await load();
-  });
+      const r = await runMatching(opts);
+      setMatchProgress({
+        processed: 0,
+        total: r.items_total || total,
+        runId: r.run_id,
+      });
+      const modeLabel = (capabilities?.modes || []).find((m) => m.id === matchMode)?.label || matchMode;
+      toast(
+        "success",
+        matchMode === "semantic"
+          ? `Сопоставление запущено (${modeLabel}). Семантика: ~15–30 мин на 1200 позиций — прогресс обновляется ниже.`
+          : `Сопоставление запущено (${modeLabel})`,
+      );
+      startPolling((done) => {
+        toast("success", `Подбор завершён — ${done.items_processed} позиций`);
+      });
+    } catch (e) {
+      if (e.status === 409) {
+        await syncMatchingState({ notify: true });
+      } else {
+        toast("error", e.message);
+        setMatchingActive(false);
+        setMatchProgress(null);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSelect = async (itemId, productId) => {
     try {
@@ -290,21 +464,25 @@ export default function App() {
     } catch (e) { toast("error", e.message); }
   };
 
-  const handleExport = (minConf = null) => wrap(async () => {
+  const handleExport = (minConf = null) => wrap("export", async () => {
     await exportResults(minConf);
     toast("success", "Файл экспортирован");
   });
 
-  const handleExportBatched = () => wrap(async () => {
+  const handleExportBatched = () => wrap("export", async () => {
     await exportResultsBatched(BEST_MATCH_THRESHOLD, BATCH_SIZE);
     toast("success", "Архив батчей экспортирован");
   });
 
   // ── Stats ──────────────────────────────────────────────────────
-  const total        = items.length;
-  const catalogCount = catalogStats.productCount;
-  const itemsCount   = total;
-  const hasData      = catalogCount > 0 || itemsCount > 0;
+  const dbItemsCount   = items.length;
+  const dbCatalogCount = catalogStats.productCount;
+  const sessionCatalogCount = lastCatalogImport?.rows ?? null;
+  const sessionItemsCount   = lastItemsImport?.rows ?? null;
+  const catalogReady = sessionCatalogCount != null && sessionCatalogCount > 0;
+  const itemsReady   = sessionItemsCount != null && sessionItemsCount > 0;
+  const total        = dbItemsCount;
+  const hasData      = catalogReady || itemsReady || dbCatalogCount > 0 || dbItemsCount > 0;
   const matched   = items.filter(i =>
     i.matches.some(m => m.is_selected && m.confidence_score >= BEST_MATCH_THRESHOLD)).length;
   const needsWork = items.filter(i =>
@@ -334,9 +512,14 @@ export default function App() {
           <span className="sub">гибрид: код · TF-IDF · fuzzy · семантика</span>
         </div>
         <div className="header-right">
-          {loading && <div className="spinner" />}
+          {(loading || matchingActive) && <div className="spinner" />}
+          {matchingActive && matchProgress && matchProgress.total > 0 && (
+            <span className="match-progress-label">
+              {matchProgress.processed} / {matchProgress.total}
+            </span>
+          )}
           <span style={{ fontSize: 12, color: "rgba(255,255,255,.5)" }}>
-            каталог: {catalogCount} · позиции: {itemsCount}
+            каталог: {sessionCatalogCount ?? "—"} · позиции: {sessionItemsCount ?? "—"}
           </span>
         </div>
       </header>
@@ -350,15 +533,17 @@ export default function App() {
             <div className="step-body">
               <div className="step-label">
                 <span className="step-num">1</span>Каталог (.xlsx)
-                {catalogCount > 0 && (
-                  <span className="step-badge step-badge-catalog">{catalogCount} в БД</span>
+                {catalogReady && (
+                  <span className="step-badge step-badge-catalog">{sessionCatalogCount} загружено</span>
                 )}
               </div>
               <div className="step-controls">
                 <FileButton label="Выбрать файл" file={catalogFile} onChange={setCatalogFile} />
                 <button className="btn btn-ghost btn-sm"
                   onClick={handleUploadCatalog} disabled={!catalogFile || loading}>
-                  Загрузить
+                  {busyAction === "catalog"
+                    ? <><div className="spinner" /> Загрузка…</>
+                    : "Загрузить"}
                 </button>
               </div>
             </div>
@@ -370,15 +555,17 @@ export default function App() {
             <div className="step-body">
               <div className="step-label">
                 <span className="step-num">2</span>Наши позиции (.xlsx)
-                {itemsCount > 0 && (
-                  <span className="step-badge step-badge-items">{itemsCount} в БД</span>
+                {itemsReady && (
+                  <span className="step-badge step-badge-items">{sessionItemsCount} загружено</span>
                 )}
               </div>
               <div className="step-controls">
                 <FileButton label="Выбрать файл" file={itemsFile} onChange={setItemsFile} />
                 <button className="btn btn-ghost btn-sm"
                   onClick={handleUploadItems} disabled={!itemsFile || loading}>
-                  Загрузить
+                  {busyAction === "items"
+                    ? <><div className="spinner" /> Загрузка…</>
+                    : "Загрузить"}
                 </button>
               </div>
             </div>
@@ -408,11 +595,24 @@ export default function App() {
                   ))}
                 </select>
                 <button className="btn btn-primary"
-                  onClick={handleRunMatching} disabled={loading || total === 0}>
-                  {loading
-                    ? <><div className="spinner" style={{ borderTopColor: "#fff" }} /> Обработка…</>
+                  onClick={handleRunMatching}
+                  disabled={loading || !itemsReady || matchingActive}>
+                  {matchingActive
+                    ? <><div className="spinner" style={{ borderTopColor: "#fff" }} /> {matchProgress?.total
+                      ? `Обработка ${matchProgress.processed}/${matchProgress.total}…`
+                      : "Сопоставление…"}</>
                     : "▶ Запустить"}
                 </button>
+                {matchingActive && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={handleCancelMatching}
+                    disabled={loading}
+                  >
+                    Остановить
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
@@ -496,15 +696,15 @@ export default function App() {
               </div>
               <div className="step-controls export-btns">
                 <button className="btn btn-ghost btn-sm"
-                  onClick={() => handleExport()} disabled={loading || total === 0}>
+                  onClick={() => handleExport()} disabled={loading || !itemsReady}>
                   Все позиции
                 </button>
                 <button className="btn btn-ghost btn-sm"
-                  onClick={() => handleExport(BEST_MATCH_THRESHOLD)} disabled={loading || total === 0}>
+                  onClick={() => handleExport(BEST_MATCH_THRESHOLD)} disabled={loading || !itemsReady}>
                   ≥{BEST_MATCH_THRESHOLD * 100}%
                 </button>
                 <button className="btn btn-green btn-sm"
-                  onClick={handleExportBatched} disabled={loading || total === 0}>
+                  onClick={handleExportBatched} disabled={loading || !itemsReady}>
                   Батчи .zip
                 </button>
               </div>
@@ -520,27 +720,44 @@ export default function App() {
           </div>
         )}
 
+        {matchingActive && matchProgress && matchProgress.total > 0 && (
+          <div className="match-progress-bar">
+            <div className="match-progress-track">
+              <div
+                className="match-progress-fill"
+                style={{
+                  width: `${Math.min(100, Math.round((matchProgress.processed / matchProgress.total) * 100))}%`,
+                }}
+              />
+            </div>
+            <div className="match-progress-text">
+              Обработано {matchProgress.processed} из {matchProgress.total} позиций
+              {" — результаты появляются по мере обработки"}
+            </div>
+          </div>
+        )}
+
         {/* ── Loaded data summary ── */}
         {hasData && (
           <div className="data-summary">
             <div className="data-summary-title">Загружено в базу</div>
             <div className="data-summary-row">
-              <div className={`data-card ${catalogCount > 0 ? "ok" : "empty"}`}>
+              <div className={`data-card ${catalogReady ? "ok" : "empty"}`}>
                 <div className="data-card-label">Каталог (шаг 1)</div>
-                <div className="data-card-value">{catalogCount || "—"}</div>
+                <div className="data-card-value">{sessionCatalogCount ?? "—"}</div>
                 <div className="data-card-hint">
                   {lastCatalogImport
                     ? `${lastCatalogImport.name}: ${lastCatalogImport.rows} строк`
-                    : catalogCount > 0 ? "готов к сопоставлению" : "загрузите файл"}
+                    : "загрузите файл"}
                 </div>
               </div>
-              <div className={`data-card ${itemsCount > 0 ? "ok" : "empty"}`}>
+              <div className={`data-card ${itemsReady ? "ok" : "empty"}`}>
                 <div className="data-card-label">Наши позиции (шаг 2)</div>
-                <div className="data-card-value">{itemsCount || "—"}</div>
+                <div className="data-card-value">{sessionItemsCount ?? "—"}</div>
                 <div className="data-card-hint">
                   {lastItemsImport
                     ? `${lastItemsImport.name}: ${lastItemsImport.rows} строк`
-                    : itemsCount > 0 ? "готов к сопоставлению" : "загрузите файл"}
+                    : "загрузите файл"}
                 </div>
               </div>
             </div>
@@ -548,11 +765,11 @@ export default function App() {
         )}
 
         {/* ── Matching results stats ── */}
-        {itemsCount > 0 && (
+        {itemsReady && (
           <div className="stats-strip">
             <div className="stat-pill">
               <div>
-                <div className="sv">{itemsCount}</div>
+                <div className="sv">{sessionItemsCount}</div>
                 <div className="sl">Позиций для подбора</div>
               </div>
             </div>
@@ -578,7 +795,7 @@ export default function App() {
         )}
 
         {/* ── Filter tabs ── */}
-        {total > 0 && (
+        {itemsReady && total > 0 && (
           <div className="filter-bar">
             {[
               { id: "all",        label: `Все (${total})` },
@@ -596,20 +813,22 @@ export default function App() {
         )}
 
         {/* ── Items list ── */}
-        {itemsCount === 0 && catalogCount > 0 ? (
+        {!itemsReady ? (
           <div className="empty-state">
-            <p>Каталог загружен ({catalogCount} товаров). Загрузите список позиций (шаг 2).</p>
-          </div>
-        ) : itemsCount === 0 ? (
-          <div className="empty-state">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
-              stroke="#94a3b8" strokeWidth="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-              <line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/>
-            </svg>
-            <p>Загрузите каталог и список позиций, затем запустите подбор</p>
+            {catalogReady || dbCatalogCount > 0 ? (
+              <p>Каталог готов. Загрузите список позиций (шаг 2).</p>
+            ) : (
+              <>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+                  stroke="#94a3b8" strokeWidth="1.5">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+                <p>Загрузите каталог и список позиций, затем запустите подбор</p>
+              </>
+            )}
           </div>
         ) : visible.length === 0 ? (
           <div className="empty-state">

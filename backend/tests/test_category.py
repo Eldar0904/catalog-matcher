@@ -6,6 +6,8 @@ from app.services.category import (
     build_category_name_map,
     infer_item_category,
     apply_catalog_categories,
+    resolve_category_from_label,
+    looks_like_catalog_code,
 )
 
 
@@ -44,6 +46,18 @@ def test_infer_item_category_for_gym_mat():
     name_map = {"521-402-0100": "Зал лечебной физкультуры"}
     code, _, _ = infer_item_category("Мат напольный 200x100", "", name_map)
     assert code == "521-402-0100"
+
+
+def test_resolve_category_from_user_label():
+    code, _, note = resolve_category_from_label("Мебель", {})
+    assert code == "521-208-0100"
+    assert "label" in note
+
+    code, _, _ = resolve_category_from_label("Прочее", {})
+    assert code is None
+
+    assert not looks_like_catalog_code("T6")
+    assert looks_like_catalog_code("521-101-0420")
 
 
 def test_apply_catalog_categories():

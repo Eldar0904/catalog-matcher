@@ -49,6 +49,14 @@ CATEGORY_KEYWORD_HINTS: Dict[str, List[str]] = {
     ],
 }
 
+# User Excel category labels (Мебель, Техника, …) -> government section codes.
+USER_CATEGORY_LABELS: Dict[str, List[str]] = {
+    "521-208-0100": ["мебель", "изо", "ателье", "интерьер", "диван", "кресл", "стул", "шкаф"],
+    "522-103-0100": ["мебель", "стол", "стеллаж", "тумб"],
+    "521-101-0400": ["техника", "компьютер", "оргтехника", "it", "пк", "моноблок", "мфу", "принтер"],
+    "522-101-0200": ["электро", "лаборатор", "питани"],
+}
+
 
 def extract_category_code(code: Optional[str]) -> Optional[str]:
     """
@@ -73,6 +81,17 @@ def is_category_header_code(code: Optional[str]) -> bool:
         return False
     third = parts[2]
     return third.isdigit() and third.endswith("00") and third not in ("000", "0000")
+
+
+def looks_like_catalog_code(code: Optional[str]) -> bool:
+    """True for government-style codes (521-101-0420), not internal labels (T6, M12)."""
+    text = (code or "").strip()
+    if not text:
+        return False
+    parts = [p for p in text.split("-") if p]
+    if len(parts) < 2:
+        return False
+    return any(p.isdigit() for p in parts)
 
 
 def build_category_name_map(products: List[CatalogProduct]) -> Dict[str, str]:
@@ -172,6 +191,26 @@ def infer_item_category(
     return None, None, ""
 
 
+def resolve_category_from_label(
+    category_name: Optional[str],
+    category_name_map: Dict[str, str],
+) -> Tuple[Optional[str], Optional[str], str]:
+    """Map user-facing Excel category label to a government section code."""
+    text = (category_name or "").strip().lower()
+    if not text or text in ("прочее", "другое", "other", "разное"):
+        return None, None, ""
+
+    for cat_code, labels in USER_CATEGORY_LABELS.items():
+        for label in labels:
+            if label in text:
+                return (
+                    cat_code,
+                    category_name_map.get(cat_code) or category_name,
+                    f"category from label ({category_name})",
+                )
+    return None, None, ""
+
+
 def resolve_item_category(
     item: InternalItem,
     category_name_map: Dict[str, str],
@@ -181,6 +220,10 @@ def resolve_item_category(
     if item.category_code:
         name = item.category_name or category_name_map.get(item.category_code)
         return item.category_code, name, "category from item"
+
+    code, name, note = resolve_category_from_label(item.category_name, category_name_map)
+    if code:
+        return code, name, note
 
     if not infer_if_missing:
         return None, None, ""

@@ -23,13 +23,25 @@ class HeuristicRanker(BaseRanker):
         item_category = (item.get("category_code") or "").strip() or None
 
         for c in candidates:
-            if c.code_matched:
-                reranked.append(c)
-                continue
-
             product = self.product_lookup.get(c.catalog_product_id)
             if product is None:
                 continue
+
+            item_code = (item.get("item_code") or "").strip()
+            product_code = (product.code or "").strip()
+            exact_code = bool(item_code and product_code and item_code == product_code)
+
+            if c.code_matched and exact_code:
+                reranked.append(c)
+                continue
+
+            if c.code_matched and not exact_code:
+                c = Candidate(
+                    catalog_product_id=c.catalog_product_id,
+                    score=c.score,
+                    explanation=c.explanation,
+                    code_matched=False,
+                )
 
             product_text = product.name or ""
             same_category = (

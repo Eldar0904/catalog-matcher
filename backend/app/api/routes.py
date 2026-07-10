@@ -1,8 +1,9 @@
 import os
 import shutil
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -28,8 +29,7 @@ from app.services.domain import (
     blocked_product_ids_for_item,
     filter_medical_candidates,
 )
-from app.matching.factory import build_engine
-from app.matching.matching_config import MatchingConfig
+from app.services.matching_job import execute_matching_run, reconcile_matching_runs, cancel_active_matching_run
 
 router = APIRouter()
 
@@ -212,11 +212,14 @@ def list_catalog_categories(
 
 
 @router.post("/match/run")
-def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
+def run_matching(
+    payload: RunMatchingRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """
-    Run the full matching pipeline for all internal items against the
-    given catalog source: retrieve top-K -> deterministic filter -> rank
-    -> persist top-N MatchResults per item.
+    Start matching in the background. Poll GET /match/status for progress.
+    Results appear incrementally (every ~25 items).
     """
     source = db.query(CatalogSource).filter(CatalogSource.name == payload.source_name).first()
     if not source:
@@ -226,6 +229,21 @@ def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
     if not items:
         raise HTTPException(status_code=400, detail="No internal items imported yet")
 
+    reconcile_matching_runs(db)
+
+    active = (
+        db.query(MatchingRun)
+        .filter(MatchingRun.finished_at.is_(None))
+        .order_by(MatchingRun.id.desc())
+        .first()
+    )
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Matching already running (run #{active.id}, {active.items_processed} items done)",
+        )
+
+    from app.matching.matching_config import MatchingConfig
     match_cfg = MatchingConfig.from_request(
         matching_mode=payload.matching_mode,
         top_k_candidates=payload.top_k_candidates,
@@ -240,96 +258,75 @@ def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
         infer_category_if_missing=payload.infer_category_if_missing,
     )
 
-    if match_cfg.use_embeddings and payload.embed_catalog_if_missing and embeddings_available():
-        embed_catalog_source(db, source.id, model_name=match_cfg.embedding_model)
-
-    backfill_source_categories(db, source.id)
-    catalog_products = (
-        db.query(CatalogProduct)
-        .filter(CatalogProduct.source_id == source.id)
-        .all()
-    )
-    category_name_map = build_category_name_map(catalog_products)
-
-    top_k = match_cfg.top_k_candidates
-    top_n = match_cfg.top_n_results
-
-    engine = build_engine(db, source.id, config=match_cfg)
+    params = match_cfg.to_dict()
+    params["items_total"] = len(items)
 
     run = MatchingRun(
         source_id=source.id,
         engine_name=match_cfg.engine_name(),
-        params=match_cfg.to_dict(),
+        params=params,
+        items_processed=0,
     )
     db.add(run)
     db.commit()
     db.refresh(run)
 
-    # Clear previous match results for these items so re-runs don't duplicate
-    item_ids = [i.id for i in items]
-    db.query(MatchResult).filter(MatchResult.item_id.in_(item_ids)).delete(synchronize_session=False)
-    db.commit()
+    background_tasks.add_task(execute_matching_run, run.id, payload)
 
-    processed = 0
-    for item in items:
-        cat_code, cat_name, cat_note = resolve_item_category(
-            item,
-            category_name_map,
-            infer_if_missing=match_cfg.infer_category_if_missing,
-        )
-        if cat_code and (item.category_code != cat_code or item.category_name != cat_name):
-            item.category_code = cat_code
-            item.category_name = cat_name
+    return {
+        "message": "Matching started",
+        "run_id": run.id,
+        "items_total": len(items),
+        "status": "running",
+    }
 
-        allowed_ids = None
-        if match_cfg.use_category_filter and cat_code:
-            allowed = product_ids_for_category(catalog_products, cat_code)
-            allowed_ids = list(allowed) if allowed else None
 
-        blocked_ids = list(blocked_product_ids_for_item(
-            item.item_name or "", item.description or "", catalog_products,
-        ))
+@router.get("/match/status")
+def match_status(db: Session = Depends(get_db)):
+    """Progress of the latest matching run."""
+    reconcile_matching_runs(db)
 
-        item_dict = {
-            "item_code": item.item_code,
-            "item_name": item.item_name,
-            "description": item.description,
-            "normalized_text": item.normalized_text,
-            "category_code": cat_code,
-            "category_name": cat_name,
-            "allowed_product_ids": allowed_ids,
-            "blocked_product_ids": blocked_ids,
-        }
-        candidates = engine.match_item(item_dict, source.id, top_k, top_n)
+    run = db.query(MatchingRun).order_by(MatchingRun.id.desc()).first()
+    if not run:
+        return {"status": "idle", "items_processed": 0, "items_total": 0}
 
-        candidates = filter_medical_candidates(
-            item.item_name or "",
-            item.description or "",
-            candidates,
-            {p.id: p for p in catalog_products},
-        )
+    item_total = db.query(InternalItem).count()
+    params = dict(run.params or {})
+    total = int(params.get("items_total") or item_total)
+    processed = run.items_processed or 0
+    cancelled = bool(params.get("cancelled"))
+    if cancelled:
+        status = "cancelled"
+    elif run.finished_at is None:
+        status = "running"
+    else:
+        status = "complete"
 
-        auto_threshold = settings.auto_select_min_confidence
-        for rank, cand in enumerate(candidates, start=1):
-            explanation = cand.explanation
-            if cat_note and rank == 1:
-                explanation = f"{explanation}; {cat_note}"
-            auto_select = rank == 1 and cand.score >= auto_threshold
-            db.add(MatchResult(
-                item_id=item.id,
-                catalog_product_id=cand.catalog_product_id,
-                rank=rank,
-                confidence_score=cand.score,
-                explanation=explanation,
-                is_selected=1 if auto_select else 0,
-                is_manual_override=0,
-            ))
-        processed += 1
+    return {
+        "run_id": run.id,
+        "status": status,
+        "items_processed": processed,
+        "items_total": total,
+        "engine_name": run.engine_name,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+    }
 
-    run.items_processed = processed
-    db.commit()
 
-    return {"message": "Matching complete", "items_processed": processed, "run_id": run.id}
+@router.post("/match/cancel")
+def cancel_matching(db: Session = Depends(get_db)):
+    """Stop the active background matching run. Partial results are kept."""
+    run = cancel_active_matching_run(db)
+    if not run:
+        return {"message": "No matching run in progress", "status": "idle"}
+    total = int((run.params or {}).get("items_total") or db.query(InternalItem).count())
+    return {
+        "message": "Matching cancelled",
+        "status": "cancelled",
+        "run_id": run.id,
+        "items_processed": run.items_processed or 0,
+        "items_total": total,
+    }
 
 
 @router.get("/items", response_model=list[InternalItemOut])

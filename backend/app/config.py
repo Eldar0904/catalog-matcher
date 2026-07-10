@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     default_matching_mode: str = "balanced"
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
     embedding_batch_size: int = 64
-    auto_embed_on_catalog_upload: bool = True
+    auto_embed_on_catalog_upload: bool = False
 
     class Config:
         env_file = ".env"
