@@ -9,8 +9,8 @@ const BEST_MATCH_THRESHOLD = 0.8;
 const BATCH_SIZE = 100;
 
 function tier(score) {
-  if (score >= 0.85) return "high";
-  if (score >= 0.55) return "medium";
+  if (score >= 0.70) return "high";
+  if (score >= 0.45) return "medium";
   return "low";
 }
 
@@ -117,9 +117,9 @@ function MatchOption({ match, rank, itemId, onSelect }) {
           ✦ Выбрано вручную
         </div>
       )}
-      {!match.is_selected && rank === 1 && (
+      {!match.is_selected && rank === 1 && pct < 60 && (
         <div style={{ fontSize: 10.5, color: "#b45309", fontWeight: 600, marginTop: 2 }}>
-          ⚠ Низкая уверенность — выберите вручную
+          ⚠ Слабое совпадение — проверьте вручную
         </div>
       )}
     </label>
@@ -441,7 +441,7 @@ export default function App() {
                       min="0"
                       max="1"
                       step="0.05"
-                      placeholder="0.15"
+                      placeholder="0.35"
                       value={advOpts.minScore}
                       onChange={(e) => setAdvOpts({ ...advOpts, minScore: e.target.value })}
                     />

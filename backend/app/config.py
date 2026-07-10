@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     # Matching engine tunables
     top_k_candidates: int = 20
     top_n_results: int = 3
-    min_similarity_score: float = 0.15  # deterministic filter cutoff
-    auto_select_min_confidence: float = 0.85  # do not auto-pick below this
+    min_similarity_score: float = 0.35  # deterministic filter cutoff
+    auto_select_min_confidence: float = 0.80  # align with export «best matches» threshold
     default_matching_mode: str = "balanced"
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
     embedding_batch_size: int = 64

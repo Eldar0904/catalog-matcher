@@ -40,7 +40,7 @@ class MatchingConfig:
     matching_mode: str = "balanced"
     top_k_candidates: int = 50
     top_n_results: int = 3
-    min_similarity_score: float = 0.15
+    min_similarity_score: float = 0.35
 
     use_code_matching: bool = True
     use_tfidf: bool = True
@@ -77,7 +77,7 @@ class MatchingConfig:
             matching_mode=mode,
             top_k_candidates=top_k_candidates if top_k_candidates is not None else defaults["top_k_candidates"],
             top_n_results=top_n_results if top_n_results is not None else 3,
-            min_similarity_score=min_similarity_score if min_similarity_score is not None else 0.15,
+            min_similarity_score=min_similarity_score if min_similarity_score is not None else 0.35,
             use_code_matching=use_code_matching if use_code_matching is not None else defaults["use_code_matching"],
             use_tfidf=use_tfidf if use_tfidf is not None else defaults["use_tfidf"],
             use_fuzzy_text=use_fuzzy_text if use_fuzzy_text is not None else defaults["use_fuzzy_text"],

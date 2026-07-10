@@ -66,6 +66,6 @@ def build_engine(
         min_score=cfg.min_similarity_score,
         use_category_filter=cfg.use_category_filter,
     )
-    ranker = HeuristicRanker()
+    ranker = HeuristicRanker(product_lookup)
 
     return MatchingEngine(retriever=retriever, filter_=filter_, ranker=ranker)

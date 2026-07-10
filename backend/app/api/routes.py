@@ -24,7 +24,10 @@ from app.services.category import (
     product_ids_for_category,
     resolve_item_category,
 )
-from app.services.domain import blocked_product_ids_for_item, is_medical_item
+from app.services.domain import (
+    blocked_product_ids_for_item,
+    filter_medical_candidates,
+)
 from app.matching.factory import build_engine
 from app.matching.matching_config import MatchingConfig
 
@@ -299,9 +302,12 @@ def run_matching(payload: RunMatchingRequest, db: Session = Depends(get_db)):
         }
         candidates = engine.match_item(item_dict, source.id, top_k, top_n)
 
-        if is_medical_item(item.item_name or "", item.description or ""):
-            if not candidates or candidates[0].score < 0.75:
-                candidates = []
+        candidates = filter_medical_candidates(
+            item.item_name or "",
+            item.description or "",
+            candidates,
+            {p.id: p for p in catalog_products},
+        )
 
         auto_threshold = settings.auto_select_min_confidence
         for rank, cand in enumerate(candidates, start=1):
