@@ -305,6 +305,7 @@ body { background: var(--bg); }
 .stat-pill.green .sv { color: var(--green); }
 .stat-pill.amber .sv { color: var(--amber); }
 .stat-pill.red   .sv { color: var(--red); }
+.stat-pill.slate .sv { color: #64748b; }
 
 /* ── Filter tabs ───────────────────────────────────────────────── */
 .filter-bar {
@@ -637,10 +638,18 @@ body { background: var(--bg); }
   border-radius: 4px;
   transition: width .4s ease;
 }
-.match-progress-text {
+.match-progress-status {
   margin-top: 8px;
-  font-size: 12px;
-  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.match-progress-sep {
+  margin: 0 6px;
+  color: var(--text-faint);
+  font-weight: 400;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────── */

@@ -6,7 +6,34 @@ import {
 } from "./api.js";
 
 const BEST_MATCH_THRESHOLD = 0.8;
+const REVIEW_MIN_THRESHOLD = 0.7; // below this → treat as no useful match
 const BATCH_SIZE = 100;
+
+function itemBestScore(item) {
+  if (!item.matches?.length) return 0;
+  return Math.max(...item.matches.map((m) => m.confidence_score));
+}
+
+function isMatchedItem(item) {
+  return item.matches.some(
+    (m) => m.is_selected && m.confidence_score >= BEST_MATCH_THRESHOLD,
+  );
+}
+
+function needsReviewItem(item) {
+  const best = itemBestScore(item);
+  return best >= REVIEW_MIN_THRESHOLD && best < BEST_MATCH_THRESHOLD
+    && !isMatchedItem(item);
+}
+
+function isPendingItem(item, runActive) {
+  return runActive && item.matches.length === 0;
+}
+
+function isNoMatchItem(item, runActive = false) {
+  if (isPendingItem(item, runActive)) return false;
+  return item.matches.length === 0 || itemBestScore(item) < REVIEW_MIN_THRESHOLD;
+}
 
 function isMatchRunFinished(st) {
   if (!st || st.status === "idle" || st.status === "complete" || st.status === "cancelled") {
@@ -127,9 +154,9 @@ function MatchOption({ match, rank, itemId, onSelect }) {
           ✦ Выбрано вручную
         </div>
       )}
-      {!match.is_selected && rank === 1 && pct < 60 && (
+      {!match.is_selected && rank === 1 && pct < REVIEW_MIN_THRESHOLD * 100 && (
         <div style={{ fontSize: 10.5, color: "#b45309", fontWeight: 600, marginTop: 2 }}>
-          ⚠ Слабое совпадение — проверьте вручную
+          ⚠ Низкая уверенность — не рекомендуется
         </div>
       )}
     </label>
@@ -348,6 +375,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (filter === "pending") setFilter("all");
+  }, [filter]);
+
+  useEffect(() => {
     fetchMatchCapabilities()
       .then((c) => {
         setCapabilities(c);
@@ -481,24 +512,26 @@ export default function App() {
   const sessionItemsCount   = lastItemsImport?.rows ?? null;
   const catalogReady = sessionCatalogCount != null && sessionCatalogCount > 0;
   const itemsReady   = sessionItemsCount != null && sessionItemsCount > 0;
+  const hasAnyMatches = items.some((i) => i.matches.length > 0);
+  const canViewResults = itemsReady || matchingActive || hasAnyMatches;
   const total        = dbItemsCount;
   const hasData      = catalogReady || itemsReady || dbCatalogCount > 0 || dbItemsCount > 0;
-  const matched   = items.filter(i =>
-    i.matches.some(m => m.is_selected && m.confidence_score >= BEST_MATCH_THRESHOLD)).length;
-  const needsWork = items.filter(i =>
-    i.matches.length > 0 &&
-    !i.matches.some(m => m.is_selected && m.confidence_score >= BEST_MATCH_THRESHOLD)).length;
-  const noMatch   = items.filter(i => i.matches.length === 0).length;
+  const matched   = items.filter(isMatchedItem).length;
+  const needsWork = items.filter(needsReviewItem).length;
+  const noMatch   = items.filter((i) => isNoMatchItem(i, matchingActive)).length;
+
+  const filterTabs = [
+    { id: "all",        label: `Все (${total})` },
+    { id: "matched",    label: `Подобраны (${matched})` },
+    { id: "needs-work", label: `Проверить (${needsWork})` },
+    { id: "no-match",   label: `Без совпадений (${noMatch})` },
+  ];
 
   // ── Filtered items ─────────────────────────────────────────────
   const visible = items.filter(i => {
-    if (filter === "matched")
-      return i.matches.some(m => m.is_selected && m.confidence_score >= BEST_MATCH_THRESHOLD);
-    if (filter === "needs-work")
-      return i.matches.length > 0 &&
-        !i.matches.some(m => m.is_selected && m.confidence_score >= BEST_MATCH_THRESHOLD);
-    if (filter === "no-match")
-      return i.matches.length === 0;
+    if (filter === "matched") return isMatchedItem(i);
+    if (filter === "needs-work") return needsReviewItem(i);
+    if (filter === "no-match") return isNoMatchItem(i, matchingActive);
     return true;
   });
 
@@ -696,15 +729,15 @@ export default function App() {
               </div>
               <div className="step-controls export-btns">
                 <button className="btn btn-ghost btn-sm"
-                  onClick={() => handleExport()} disabled={loading || !itemsReady}>
+                  onClick={() => handleExport()} disabled={loading || !canViewResults}>
                   Все позиции
                 </button>
                 <button className="btn btn-ghost btn-sm"
-                  onClick={() => handleExport(BEST_MATCH_THRESHOLD)} disabled={loading || !itemsReady}>
+                  onClick={() => handleExport(BEST_MATCH_THRESHOLD)} disabled={loading || !canViewResults}>
                   ≥{BEST_MATCH_THRESHOLD * 100}%
                 </button>
                 <button className="btn btn-green btn-sm"
-                  onClick={handleExportBatched} disabled={loading || !itemsReady}>
+                  onClick={handleExportBatched} disabled={loading || !canViewResults}>
                   Батчи .zip
                 </button>
               </div>
@@ -730,9 +763,14 @@ export default function App() {
                 }}
               />
             </div>
-            <div className="match-progress-text">
-              Обработано {matchProgress.processed} из {matchProgress.total} позиций
-              {" — результаты появляются по мере обработки"}
+            <div className="match-progress-status">
+              Обработано {matchProgress.processed}/{matchProgress.total}
+              <span className="match-progress-sep">·</span>
+              подобрано {matched}
+              <span className="match-progress-sep">·</span>
+              проверить {needsWork}
+              <span className="match-progress-sep">·</span>
+              слабые {noMatch}
             </div>
           </div>
         )}
@@ -744,7 +782,9 @@ export default function App() {
             <div className="data-summary-row">
               <div className={`data-card ${catalogReady ? "ok" : "empty"}`}>
                 <div className="data-card-label">Каталог (шаг 1)</div>
-                <div className="data-card-value">{sessionCatalogCount ?? "—"}</div>
+                {catalogReady && (
+                  <div className="data-card-value">{sessionCatalogCount}</div>
+                )}
                 <div className="data-card-hint">
                   {lastCatalogImport
                     ? `${lastCatalogImport.name}: ${lastCatalogImport.rows} строк`
@@ -753,7 +793,9 @@ export default function App() {
               </div>
               <div className={`data-card ${itemsReady ? "ok" : "empty"}`}>
                 <div className="data-card-label">Наши позиции (шаг 2)</div>
-                <div className="data-card-value">{sessionItemsCount ?? "—"}</div>
+                {itemsReady && (
+                  <div className="data-card-value">{sessionItemsCount}</div>
+                )}
                 <div className="data-card-hint">
                   {lastItemsImport
                     ? `${lastItemsImport.name}: ${lastItemsImport.rows} строк`
@@ -764,45 +806,10 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Matching results stats ── */}
-        {itemsReady && (
-          <div className="stats-strip">
-            <div className="stat-pill">
-              <div>
-                <div className="sv">{sessionItemsCount}</div>
-                <div className="sl">Позиций для подбора</div>
-              </div>
-            </div>
-            <div className="stat-pill green">
-              <div>
-                <div className="sv">{matched}</div>
-                <div className="sl">Подобрано ≥{BEST_MATCH_THRESHOLD * 100}%</div>
-              </div>
-            </div>
-            <div className="stat-pill amber">
-              <div>
-                <div className="sv">{needsWork}</div>
-                <div className="sl">Требует проверки</div>
-              </div>
-            </div>
-            <div className="stat-pill red">
-              <div>
-                <div className="sv">{noMatch}</div>
-                <div className="sl">Без совпадений</div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* ── Filter tabs ── */}
-        {itemsReady && total > 0 && (
+        {canViewResults && total > 0 && (
           <div className="filter-bar">
-            {[
-              { id: "all",        label: `Все (${total})` },
-              { id: "matched",    label: `Подобраны (${matched})` },
-              { id: "needs-work", label: `Проверить (${needsWork})` },
-              { id: "no-match",   label: `Без совпадений (${noMatch})` },
-            ].map(f => (
+            {filterTabs.map(f => (
               <button key={f.id}
                 className={`filter-tab ${filter === f.id ? "active" : ""}`}
                 onClick={() => setFilter(f.id)}>
@@ -813,7 +820,7 @@ export default function App() {
         )}
 
         {/* ── Items list ── */}
-        {!itemsReady ? (
+        {!canViewResults ? (
           <div className="empty-state">
             {catalogReady || dbCatalogCount > 0 ? (
               <p>Каталог готов. Загрузите список позиций (шаг 2).</p>
